@@ -1,0 +1,35 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ctf.hackmestepbro.com;
+    access_log off;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 308 https://ctf.hackmestepbro.com$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ctf.hackmestepbro.com;
+    ssl_certificate /etc/letsencrypt/live/ctf.hackmestepbro.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ctf.hackmestepbro.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    access_log off;
+    client_max_body_size 4k;
+    client_body_timeout 10s;
+    proxy_read_timeout 10s;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:18196;
+        proxy_set_header Host ctf.hackmestepbro.com;
+    }
+}

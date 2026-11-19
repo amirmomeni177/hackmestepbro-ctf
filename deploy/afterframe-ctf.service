@@ -1,0 +1,19 @@
+[Unit]
+Description=Afterframe CTF
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/afterframe-ctf
+EnvironmentFile=/etc/afterframe-ctf.env
+ExecStart=/usr/bin/python3 /opt/afterframe-ctf/server.py
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

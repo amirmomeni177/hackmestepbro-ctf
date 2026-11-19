@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Browse and play HackMeStepBro CTF challenges.">
+  <meta name="theme-color" content="#101016">
+  <title>CTF Library — HackMeStepBro</title>
+  <link rel="icon" href="/assets/icon.1.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.2.css">
+  <link rel="stylesheet" href="/assets/library.2.css">
+  <script src="/assets/library.1.js" defer></script>
+</head>
+<body>
+  <div class="shell library-shell">
+    <header class="header">
+      <a href="/" class="brand library-brand"><span class="brand-mark" aria-hidden="true"></span>hackmestepbro<span class="brand-dot">.</span></a>
+    </header>
+    <main class="library">
+      <section class="library-intro">
+        <div>
+          <h1>CTF <em>Library.</em></h1>
+          <p class="lede">Choose a challenge and capture the flag.</p>
+        </div>
+        <div class="library-search" id="library-search" hidden>
+          <label for="challenge-query">Find a challenge</label>
+          <input id="challenge-query" type="search" placeholder="Search by name or category" autocomplete="off">
+        </div>
+      </section>
+      <section class="library-list" aria-labelledby="challenge-title">
+        <div class="library-list-header">
+          <h2 id="challenge-title">Challenges</h2>
+          <span id="challenge-count" role="status">{{COUNT}}</span>
+        </div>
+        <div class="challenge-grid" id="challenge-grid">{{CARDS}}</div>
+        <p class="library-empty" id="no-challenges" hidden>No challenges match your search.</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

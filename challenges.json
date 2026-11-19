@@ -1,0 +1,11 @@
+[
+  {
+    "id": "the-wrong-window",
+    "name": "The Wrong Window",
+    "path": "/challenges/the-wrong-window",
+    "category": "Browser security",
+    "difficulty": "Intermediate",
+    "description": "Follow a creator studio’s browser messages and uncover a window trust failure.",
+    "image": "/assets/terminal.1.webp"
+  }
+]

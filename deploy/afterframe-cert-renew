@@ -1,0 +1,5 @@
+#!/bin/sh
+
+if [ "${RENEWED_LINEAGE:-}" = /etc/letsencrypt/live/ctf.hackmestepbro.com ]; then
+    systemctl reload nginx
+fi

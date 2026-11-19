@@ -1,0 +1,26 @@
+.library-shell { min-height: 100svh; }
+.library-brand { font-size: clamp(1.35rem, 3vw, 1.65rem); }
+.library { padding: clamp(40px, 7.5vw, 104px) 0 68px; }
+.library-intro { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 22px 35px; padding-bottom: clamp(24px, 3.5vw, 44px); border-bottom: 1px solid var(--border); }
+.library-intro h1 { font-size: clamp(3.4rem, 8vw, 7.15rem); word-spacing: .075em; }
+.library-intro .lede { margin-top: 18px; max-width: none; }
+.library-search { width: min(100%, 280px); display: grid; gap: 7px; font-size: .9rem; }
+.library-search label { color: var(--muted); }
+.library-search input { background: var(--inset); color: var(--white); border: 1px solid #4b415a; border-radius: 8px; padding: 0 12px; min-height: 45px; font: inherit; }
+.library-list { margin-top: 26px; }
+.library-list-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.library-list-header h2 { font-size: 1.3rem; letter-spacing: -.025em; font-weight: 650; }
+.library-list-header span { color: var(--muted); font-size: .9rem; }
+.challenge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 18px; }
+.challenge-card { display: flex; flex-direction: column; min-width: 0; text-decoration: none; background: var(--panel); border: 1px solid var(--border); border-radius: 13px; overflow: hidden; transition: border-color .18s ease, background .18s ease; }
+.challenge-card:hover { color: var(--white); background: #201b2a; border-color: #695689; }
+.challenge-image { width: 100%; height: auto; flex: none; display: block; aspect-ratio: 2.15; object-fit: cover; object-position: center 51%; background: #23193e; border-bottom: 1px solid var(--border); }
+.challenge-content { flex: 1; display: flex; flex-direction: column; align-items: start; padding: 19px; }
+.challenge-meta { display: flex; gap: 7px; flex-wrap: wrap; color: var(--muted); font-size: .82rem; }
+.challenge-meta span + span::before { content: "·"; margin-right: 7px; color: var(--purple); }
+.challenge-card h3 { margin: 8px 0 4px; font-size: 1.51rem; line-height: 1.14; font-weight: 650; letter-spacing: -.03em; }
+.challenge-card p { color: var(--muted); margin-bottom: 18px; line-height: 1.45; }
+.challenge-action { color: var(--accent); font-size: .88rem; font-weight: 650; margin-top: auto; border-radius: 5px; }
+.challenge-action[data-solved] { color: #bcf3d1; }
+.library-empty { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .challenge-card { transition: none; } }
