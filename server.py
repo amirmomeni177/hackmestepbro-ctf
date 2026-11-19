@@ -8,13 +8,30 @@ from html import escape
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
+
+from oauth_lab import (
+    AUTHORIZE_PATH, CALLBACK_PATH, PROFILE_PATH, TOKEN_PATH, TRANSACTION_AGE,
+    OAuthError, OAuthLab, opaque, valid_secret,
+)
 
 PUBLIC = Path(__file__).resolve().parent / "public"
 FLAG = os.environ.get("AFTERFRAME_FLAG") or f"CTF{{{secrets.token_hex(16)}}}"
 SESSION_KEY = secrets.token_bytes(32)
 SESSION_AGE = 12 * 60 * 60
 COOKIE = "__Host-afterframe-demo"
+OAUTH_COOKIE = "__Host-afterframe-oauth"
+CONSENT_COOKIE = "__Host-afterframe-consent"
+PORT = int(os.environ.get("AFTERFRAME_PORT", "18196"))
+OAUTH = OAuthLab(
+    os.environ.get("AFTERFRAME_APP_ORIGIN", f"http://127.0.0.1:{PORT}").rstrip("/"),
+    os.environ.get("AFTERFRAME_ISSUER_ORIGIN", f"http://localhost:{PORT}").rstrip("/"),
+    PORT,
+)
+ISSUER_ASSETS = {
+    "/assets/icon.1.svg", "/assets/site.2.css", "/assets/oauth.1.css",
+    "/assets/instrument-sans.woff2", "/assets/instrument-serif.woff2",
+}
 
 VIEWS = {
     "/studio": "Overview",
@@ -24,11 +41,11 @@ VIEWS = {
     "/studio/help": "Help center",
 }
 CHALLENGE_PATH = "/challenges/the-wrong-window"
-PAGES = {CHALLENGE_PATH: "challenge.html", "/connect/instagram": "connect.html", "/case": "case.html"}
+PAGES = {CHALLENGE_PATH: "challenge.html", "/case": "case.html"}
 CATALOG = json.loads((PUBLIC.parent / "challenges.json").read_text(encoding="utf-8"))
 ASSETS = {
     "site.2.css": "text/css; charset=utf-8",
-    "auth.3.js": "text/javascript; charset=utf-8",
+    "oauth.1.css": "text/css; charset=utf-8",
     "studio.3.js": "text/javascript; charset=utf-8",
     "case.4.js": "text/javascript; charset=utf-8",
     "library.2.css": "text/css; charset=utf-8",
@@ -95,20 +112,22 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def reply(self, status, content, content_type, cache="no-store", headers=()):
+    def reply(self, status, content, content_type, cache="no-store", headers=(), consent=False):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Referrer-Policy", "same-origin" if consent else "no-referrer")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        form_action = f"'self' {OAUTH.app_origin}" if consent else "'none'"
         self.send_header("Content-Security-Policy",
                          "default-src 'none'; script-src 'self'; style-src 'self'; "
                          "img-src 'self'; font-src 'self'; connect-src 'self'; "
-                         "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                         "base-uri 'none'; frame-ancestors 'none'; "
+                         f"form-action {form_action}")
         if self.close_connection:
             self.send_header("Connection", "close")
         for name, value in headers:
@@ -121,18 +140,21 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(status, json.dumps(data, ensure_ascii=False).encode(),
                    "application/json; charset=utf-8", headers=headers)
 
+    def cookie_value(self, name):
+        try:
+            cookie = SimpleCookie(self.headers.get("Cookie", "")).get(name)
+            return cookie.value if cookie else ""
+        except CookieError:
+            return ""
+
     def signed_in(self):
         try:
-            cookies = SimpleCookie(self.headers.get("Cookie", ""))
-            cookie = cookies.get(COOKIE)
-            if not cookie:
-                return False
-            issued, nonce, signature = cookie.value.split(".")
+            issued, nonce, signature = self.cookie_value(COOKIE).split(".")
             if len(nonce) != 24 or len(signature) != 64 or len(issued) != 10:
                 return False
             age = int(time.time()) - int(issued)
             return 0 <= age < SESSION_AGE and hmac.compare_digest(signature, sign(f"{issued}.{nonce}"))
-        except (ValueError, CookieError, TypeError):
+        except (ValueError, TypeError):
             return False
 
     def session_cookie(self, clear=False):
@@ -141,6 +163,106 @@ class Handler(BaseHTTPRequestHandler):
             value = f"{value}.{sign(value)}"
         age = 0 if clear else SESSION_AGE
         return f"{COOKIE}={value}; Path=/; Max-Age={age}; Secure; HttpOnly; SameSite=Lax"
+
+    def redirect(self, location, headers=()):
+        self.reply(303, b"", "text/plain; charset=utf-8",
+                   headers=[("Location", location), *headers])
+
+    def transaction_cookie(self, name):
+        browser = self.cookie_value(name)
+        if not valid_secret(browser):
+            browser = opaque()
+        cookie = f"{name}={browser}; Path=/; Max-Age={TRANSACTION_AGE}; Secure; HttpOnly; SameSite=Lax"
+        return browser, [("Set-Cookie", cookie)]
+
+    def oauth_status(self, title, status):
+        template = (PUBLIC / "connect-status.html").read_text(encoding="utf-8")
+        html = template.replace("{{STATUS}}", escape(title))
+        self.reply(status, html.encode("utf-8"), "text/html; charset=utf-8")
+
+    def read_body(self):
+        size = int(self.headers.get("Content-Length", "0"))
+        if not 0 < size <= 2048:
+            raise ValueError
+        return self.rfile.read(size)
+
+    def oauth_params(self, query):
+        pairs = parse_qsl(query, keep_blank_values=True, max_num_fields=12)
+        params = dict(pairs)
+        if len(pairs) != len(params):
+            raise ValueError
+        return params
+
+    def is_internal(self):
+        supplied = self.headers.get("X-Afterframe-Internal")
+        return valid_secret(supplied) and hmac.compare_digest(OAUTH.internal_secret, supplied)
+
+    def issuer_get(self, request):
+        if request.path == PROFILE_PATH and self.is_internal():
+            authorization = self.headers.get("Authorization", "")
+            profile = OAUTH.tokens.get(authorization[7:]) if authorization.startswith("Bearer ") else None
+            if profile is None:
+                self.json_reply(401, {"error": "invalid_token"})
+            else:
+                self.json_reply(200, profile)
+            return
+        if request.path in ISSUER_ASSETS:
+            self.asset(request.path)
+            return
+        if request.path != AUTHORIZE_PATH:
+            self.json_reply(404, {"message": "Route not found."})
+            return
+        try:
+            browser, headers = self.transaction_cookie(CONSENT_COOKIE)
+            grant = OAUTH.prepare_consent(self.oauth_params(request.query), browser)
+        except (ValueError, OAuthError):
+            self.reply(400, b"Invalid authorization request.", "text/plain; charset=utf-8")
+            return
+        template = (PUBLIC / "oauth-consent.html").read_text(encoding="utf-8")
+        content = template.replace("{{TRANSACTION}}", escape(grant))
+        self.reply(200, content.encode("utf-8"), "text/html; charset=utf-8", headers=headers, consent=True)
+
+    def issuer_post(self, path):
+        is_token = path == TOKEN_PATH and self.is_internal()
+        if path != AUTHORIZE_PATH and not is_token:
+            self.json_reply(404, {"message": "Route not found."})
+            return
+        if not is_token and self.headers.get("Origin") != OAUTH.issuer_origin:
+            self.json_reply(403, {"error": "invalid_request"})
+            return
+        if self.headers.get_content_type() != "application/x-www-form-urlencoded":
+            self.json_reply(415, {"error": "invalid_request"})
+            return
+        try:
+            params = self.oauth_params(self.read_body().decode("ascii"))
+            if is_token:
+                token = OAUTH.exchange(params)
+            else:
+                result = OAUTH.complete_consent(params.get("transaction"), self.cookie_value(CONSENT_COOKIE), params.get("decision"))
+        except (ValueError, UnicodeError):
+            self.json_reply(400, {"error": "invalid_request"})
+            return
+        except OAuthError as error:
+            if is_token:
+                self.json_reply(400, {"error": str(error)})
+            else:
+                self.reply(400, b"Consent expired. Restart from the challenge page.", "text/plain; charset=utf-8")
+            return
+        if is_token:
+            self.json_reply(200, token)
+        else:
+            self.redirect(result)
+
+    def handle_callback(self, query):
+        try:
+            approved = OAUTH.complete_callback(self.oauth_params(query), self.cookie_value(OAUTH_COOKIE))
+        except (ValueError, OAuthError):
+            self.redirect("/connect/status?result=error")
+            return
+        if approved:
+            self.redirect("/studio", headers=[("Set-Cookie", self.session_cookie())])
+        else:
+            self.redirect("/connect/status?result=cancelled")
 
     def authenticated_post(self):
         host = self.headers.get("Host")
@@ -177,10 +299,43 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
     def do_HEAD(self):
+        if urlsplit(self.path).path in {AUTHORIZE_PATH, CALLBACK_PATH, "/connect/instagram"}:
+            self.reply(405, b"", "text/plain; charset=utf-8", headers=[("Allow", "GET")])
+            return
         self.do_GET()
 
+    def asset(self, path):
+        name = path.removeprefix("/assets/")
+        if name in ASSETS:
+            self.reply(200, (PUBLIC / "assets" / name).read_bytes(),
+                       ASSETS[name], "public, max-age=86400")
+        else:
+            self.json_reply(404, {"message": "Route not found."})
+
     def do_GET(self):
-        path = urlsplit(self.path).path
+        request = urlsplit(self.path)
+        if self.headers.get("Host") == OAUTH.issuer_host:
+            self.issuer_get(request)
+            return
+        if self.headers.get("Host") != OAUTH.app_host:
+            self.json_reply(404, {"message": "Route not found."})
+            return
+        path = request.path
+        if path == "/connect/instagram":
+            try:
+                browser, headers = self.transaction_cookie(OAUTH_COOKIE)
+                self.redirect(OAUTH.start(browser), headers)
+            except OAuthError:
+                self.oauth_status("Sign-in is temporarily unavailable", 503)
+            return
+        if path == CALLBACK_PATH:
+            self.handle_callback(request.query)
+            return
+        if path == "/connect/status":
+            cancelled = request.query == "result=cancelled"
+            title = "Connection cancelled" if cancelled else "Sign-in could not be completed"
+            self.oauth_status(title, 200 if cancelled else 400)
+            return
         if path == "/":
             self.library()
             return
@@ -204,17 +359,18 @@ class Handler(BaseHTTPRequestHandler):
             self.json_reply(200, content)
             return
         if path.startswith("/assets/"):
-            name = path.removeprefix("/assets/")
-            if name in ASSETS:
-                self.reply(200, (PUBLIC / "assets" / name).read_bytes(),
-                           ASSETS[name], "public, max-age=86400")
-                return
+            self.asset(path)
+            return
         self.json_reply(404, {"message": "Route not found."})
 
     def do_POST(self):
         self.close_connection = True
         path = urlsplit(self.path).path
-        if path not in {"/api/demo/session", "/api/demo/signout", "/api/verify"}:
+        host = self.headers.get("Host")
+        if host == OAUTH.issuer_host:
+            self.issuer_post(path)
+            return
+        if host != OAUTH.app_host or path not in {"/api/demo/signout", "/api/verify"}:
             self.json_reply(404, {"message": "Route not found."})
             return
         if not self.authenticated_post():
@@ -224,20 +380,11 @@ class Handler(BaseHTTPRequestHandler):
             self.json_reply(415, {"message": "Send an application/json body."})
             return
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 2048:
-                raise ValueError
-            body = json.loads(self.rfile.read(length))
+            body = json.loads(self.read_body())
             if not isinstance(body, dict):
                 raise ValueError
         except (ValueError, UnicodeError):
             self.json_reply(400, {"message": "Send a short JSON object."})
-            return
-        if path == "/api/demo/session":
-            if body.get("account") != "riley-frames":
-                self.json_reply(400, {"message": "Choose the available demo account."})
-                return
-            self.json_reply(200, {"connected": True}, [("Set-Cookie", self.session_cookie())])
             return
         if path == "/api/demo/signout":
             self.json_reply(200, {"connected": False}, [("Set-Cookie", self.session_cookie(clear=True))])
@@ -260,7 +407,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     bind = "127.0.0.1"
-    port = int(os.environ.get("AFTERFRAME_PORT", "18196"))
-    with ThreadingHTTPServer((bind, port), Handler) as server:
-        print(f"Afterframe is ready at http://{bind}:{port}", flush=True)
+    with ThreadingHTTPServer((bind, PORT), Handler) as server:
+        print(f"Afterframe is ready at http://{bind}:{PORT}", flush=True)
         server.serve_forever()

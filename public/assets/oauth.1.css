@@ -1,0 +1,9 @@
+.consent-card { width: min(100%, 480px); }
+.consent-card .consent-kicker { margin: 0; color: var(--accent); font: 600 .75rem/1.4 var(--mono); letter-spacing: .09em; }
+.consent-card .account { margin-bottom: 12px; }
+.consent-permission { padding: 13px; border: 1px solid var(--border); border-radius: 10px; }
+.consent-permission small, .consent-permission code { display: block; margin-top: 3px; color: var(--muted); font-size: .82rem; }
+.consent-permission code { color: var(--accent); overflow-wrap: anywhere; }
+.consent-actions { display: flex; gap: 8px; margin-top: 18px; }
+.consent-actions button { flex: 1; width: auto; padding-inline: 10px; }
+.challenge-login.button { text-decoration: none; }

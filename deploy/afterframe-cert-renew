@@ -1,5 +1,7 @@
 #!/bin/sh
 
-if [ "${RENEWED_LINEAGE:-}" = /etc/letsencrypt/live/ctf.hackmestepbro.com ]; then
-    systemctl reload nginx
-fi
+case "${RENEWED_LINEAGE:-}" in
+    /etc/letsencrypt/live/ctf.hackmestepbro.com|/etc/letsencrypt/live/oauth-lab.hackmestepbro.com)
+        systemctl reload nginx
+        ;;
+esac

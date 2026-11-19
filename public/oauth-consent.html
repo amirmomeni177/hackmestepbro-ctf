@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101016">
+  <title>Authorize Afterframe Studio · OAuth Lab</title>
+  <link rel="icon" href="/assets/icon.1.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.2.css">
+  <link rel="stylesheet" href="/assets/oauth.1.css">
+</head>
+<body>
+  <main class="identity">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>OAuth Lab<span class="brand-dot">.</span></div>
+    <section class="identity-card consent-card">
+      <p class="consent-kicker">DEMO ACCOUNT</p>
+      <h1>Authorize Afterframe Studio</h1>
+      <p>Afterframe Studio is requesting read access to this fictional creator profile.</p>
+      <div class="account">
+        <span class="avatar" aria-hidden="true">RL</span>
+        <span><strong>Riley Lane</strong><small>@riley.frames · Demo creator</small></span>
+      </div>
+      <div class="consent-permission">
+        <strong>Read basic profile</strong>
+        <small>Account ID and username</small>
+        <code>instagram_business_basic</code>
+      </div>
+      <form method="post" action="/oauth/authorize" class="consent-actions">
+        <input type="hidden" name="transaction" value="{{TRANSACTION}}">
+        <button class="button secondary" name="decision" value="deny">Cancel</button>
+        <button class="button primary" name="decision" value="allow">Allow access</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
