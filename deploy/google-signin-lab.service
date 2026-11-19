@@ -1,0 +1,23 @@
+[Unit]
+Description=Google sign-in reference lab (stock OmniAuth, mock IdP)
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=google-signin-lab
+WorkingDirectory=/opt/afterframe-ctf/labs/google-signin
+Environment=PORT=18320
+Environment=PUBLIC_ORIGIN=https://ctf.hackmestepbro.com
+Environment=LAB_DATA_DIR=/var/lib/google-signin-lab
+Environment=HOME=/tmp
+ExecStart=/opt/afterframe-ctf/labs/google-signin/start.sh
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -7,5 +7,14 @@
     "difficulty": "Intermediate",
     "description": "Follow a creator studio’s browser messages and uncover a window trust failure.",
     "image": "/assets/terminal.1.webp"
+  },
+  {
+    "id": "google-signin-lab",
+    "name": "Google Sign-In Reference Lab",
+    "path": "/labs/google-signin/",
+    "category": "OAuth / OIDC",
+    "difficulty": "Reference lab",
+    "description": "Stock OmniAuth Google sign-in (pinned gems, unmodified) against a mock identity provider. Study lab: no flag.",
+    "image": "/assets/terminal.1.webp"
   }
 ]

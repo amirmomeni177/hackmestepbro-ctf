@@ -16,6 +16,12 @@ With Python 3.9 or later, run `python3 server.py` and open [localhost:18196](htt
 
 The service and proxy examples in `deploy/` configure the [CTF site](https://ctf.hackmestepbro.com) and its demo OAuth issuer at `oauth-lab.hackmestepbro.com`. Install `oauth-origins.conf` as a systemd drop-in when deploying both HTTPS hosts. The token and profile exchanges go over loopback. The source includes the answer checker and contains spoilers.
 
+## Reference labs
+
+Labs under `labs/` are study replicas, not challenges: they have no flag and no planted bug.
+
+- [`labs/google-signin`](labs/google-signin/README.md) runs a Rails-style "Sign in with Google" flow on the stock OmniAuth stack. The gems are pinned and unmodified: `omniauth` 2.4.2, `omniauth-oauth2` 1.10.1, `omniauth-google-oauth2` 1.2.3 and `oauth2` 2.1.0. They run against an in-lab mock identity provider. It is served at [ctf.hackmestepbro.com/labs/google-signin/](https://ctf.hackmestepbro.com/labs/google-signin/) by `deploy/google-signin-lab.service` on loopback port 18320, behind the `/labs/google-signin/` location in `deploy/ctf.hackmestepbro.com.nginx`.
+
 ## Inspiration
 
 - [Youssef Sammouda’s Instagram and Meta Pixel write-up](https://ysamm.com/uncategorized/2026/01/16/leaking-fbevents-ato.html)
