@@ -1,0 +1,8 @@
+query DashboardQuery {
+  currentUser {
+    name email signInProvider
+    workspace { name }
+    boards(first: 3) { title assetsCount updatedAt coverHue }
+    activity(first: 3) { actorName verb boardTitle at }
+  }
+}

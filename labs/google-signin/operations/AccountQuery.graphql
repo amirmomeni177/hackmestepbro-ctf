@@ -1,0 +1,3 @@
+query AccountQuery {
+  currentUser { name email signInProvider }
+}

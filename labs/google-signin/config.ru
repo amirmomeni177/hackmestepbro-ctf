@@ -8,6 +8,7 @@ require_relative "idp"
 
 data = Lab::Data.new(ENV.fetch("LAB_DATA_DIR", File.join(__dir__, "data")))
 Lab::RelyingParty.set :data, data
+Lab::RelyingParty.set :id_token_validator, GoogleIDToken::Validator.new(x509_cert: data.signing_certificate)
 Lab::MockIdentityProvider.set :data, data
 Lab::MockIdentityProvider.set :grants, Lab::Grants.new(data.signing_key)
 

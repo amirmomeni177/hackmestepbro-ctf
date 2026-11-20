@@ -1163,3 +1163,67 @@ body.keystone {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+.tracking-consent,
+.one-tap,
+.one-tap-error {
+  position: fixed;
+  z-index: 10;
+  width: min(22rem, calc(100% - 2rem));
+  padding: 1rem;
+  border-radius: .75rem;
+  box-shadow: 0 .75rem 2rem #16101133;
+}
+
+.tracking-consent {
+  inset: auto auto 1rem 1rem;
+  background: #282125;
+  border: 1px solid #51434a;
+  color: #fffdfa;
+}
+
+.tracking-consent .button { margin-top: .65rem; }
+.tracking-consent[hidden], .one-tap-error[hidden] { display: none; }
+
+.one-tap,
+.one-tap-error {
+  inset: 2.75rem 1rem auto auto;
+  background: #fffdfa;
+  border: 1px solid #b6c6ba;
+  color: #1c2926;
+}
+
+.one-tap header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .75rem;
+  font-weight: 700;
+}
+
+.one-tap-close {
+  margin-left: auto;
+  padding: 0 .5rem;
+  border: 0;
+  background: transparent;
+  color: #15544d;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.one-tap-account,
+.one-tap a {
+  display: block;
+  width: 100%;
+  padding: .6rem .75rem;
+  border: 1px solid #15544d;
+  border-radius: .45rem;
+  background: #15544d;
+  color: #fffdfa;
+  text-align: center;
+  cursor: pointer;
+}
+
+.one-tap-account + .one-tap-account { margin-top: .4rem; }
+.one-tap [role="alert"]:empty { display: none; }
+.one-tap [role="alert"], .one-tap-error { color: #8d2522; }

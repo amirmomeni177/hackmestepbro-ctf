@@ -1,0 +1,11 @@
+<main id="main-content" class="wrap signin-page" tabindex="-1">
+  <section class="signin-card">
+    <h1><%= escape(title) %></h1>
+    <% if document == "privacy" %>
+      <p>Lumora uses the selected fictional account’s name, email, and account identifier to create your lab profile. Agreeing to the cookie banner enables One Tap in this browser.</p>
+    <% else %>
+      <p>Lumora and Keystone ID are fictional services in a sign-in lab. Use one of the Keystone ID test accounts.</p>
+    <% end %>
+    <a class="back-link" href="<%= escape(Lab::HOME_PATH) %>">Return to Lumora <%= icon("arrow") %></a>
+  </section>
+</main>

@@ -2,6 +2,7 @@
 
 require "base64"
 require "cgi"
+require "digest"
 require "fileutils"
 require "json"
 require "jwt"
@@ -23,6 +24,10 @@ class FlowTest < Minitest::Test
   IDP = "#{BASE}/idp"
   LAB_NOTICE = '<a href="/">Lumora is a fictional site — HackMeStepBro reference lab · no flag</a>'
   GRAPHQL = "#{BASE}/graphql"
+  FEDCM = "#{IDP}/gsi/fedcm"
+  FEDCM_HEADERS = { "Sec-Fetch-Dest" => "webidentity", "Origin" => ORIGIN }.freeze
+  FALLBACK_HEADERS = { "Sec-Fetch-Site" => "same-origin", "X-Keystone-One-Tap" => "1", "Origin" => ORIGIN }.freeze
+  OAUTH_OPERATION = "SignInWithOAuthMutation"
   PROFILE_UPDATE = <<~GRAPHQL
     mutation UpdateProfile($input: UpdateProfileInput!) {
       updateProfile(input: $input) { currentUser { id name } errors { path message } }
@@ -90,12 +95,12 @@ class FlowTest < Minitest::Test
 
   def setup
     self.class.start_server
-    @cookie = nil
+    @cookies = {}
   end
 
   def test_full_sign_in_as_alice
     page = get_home
-    cookie = page["set-cookie"]
+    cookie = session_cookie(page)
     assert_match(/; path=#{Regexp.escape(BASE)}(?:;|$)/i, cookie)
     assert_match(/; secure(?:;|$)/i, cookie)
     assert_match(/; httponly(?:;|$)/i, cookie)
@@ -307,16 +312,23 @@ class FlowTest < Minitest::Test
     assert_equal "UNAUTHENTICATED", graphql_error(graphql("mutation SignOut { signOut { success } }"))
   end
 
-  def test_graphql_mutations_require_a_matching_csrf_header
+  def test_graphql_mutations_without_a_matching_csrf_header_see_an_empty_session
     sign_in
     account = request(Net::HTTP::Get, "#{BASE}/account")
     assert_includes account.body, "<fieldset disabled"
     assert_includes account.body, "Enable JavaScript to edit your display name."
     before = File.read(File.join(self.class.directory, "users.json"))
     [nil, "incorrect", form_token(get_home.body, "#{BASE}/signout")].each do |token|
-      assert_equal "INVALID_CSRF_TOKEN", graphql_error(update_profile("Rejected", token: token))
-      assert_equal "INVALID_CSRF_TOKEN", graphql_error(graphql("mutation SignOut { signOut { success } }", token: token))
+      assert_equal "UNAUTHENTICATED", graphql_error(update_profile("Rejected", token: token))
+      refute session_cookie(@last_graphql_response)
+      assert_equal "UNAUTHENTICATED", graphql_error(graphql("mutation SignOut { signOut { success } }", token: token))
+      refute session_cookie(@last_graphql_response)
     end
+    wrong_origin = request(Net::HTTP::Post, GRAPHQL, headers: { "Content-Type" => "application/json",
+                                                              "Origin" => "https://other.test" },
+                           body: JSON.generate(query: "mutation SignOut { signOut { success } }"))
+    assert_equal "UNAUTHENTICATED", graphql_error(JSON.parse(wrong_origin.body))
+    refute session_cookie(wrong_origin)
     assert_equal before, File.read(File.join(self.class.directory, "users.json"))
     assert_equal true, me.fetch("signed_in")
 
@@ -369,7 +381,7 @@ class FlowTest < Minitest::Test
     query = "query BoardBySlug($slug: String!) { board(slug: $slug) { id slug } }"
     assert_equal({ "data" => { "board" => board } }, graphql(query, variables: { slug: board.fetch("slug") }))
 
-    @cookie = nil
+    @cookies.clear
     sign_in
     assert_equal({ "data" => { "board" => nil } }, graphql(query, variables: { slug: board.fetch("slug") }))
   end
@@ -405,11 +417,365 @@ class FlowTest < Minitest::Test
     assert_includes response.body, "updateProfile(input: UpdateProfileInput!): UpdateProfilePayload!"
     assert_includes response.body, "boards(first: Int = 10): [Board!]!"
     assert_includes response.body, "path: [String!]"
+    assert_includes response.body, "signInWithOauth(input: signInWithOAuthInput!): SignInWithOAuthMutationPayload!"
+    assert_includes response.body, "idToken: String!"
+    assert_includes response.body, "platform: Platform"
+    assert_includes response.body, "provider: OAuthProvider!"
     types = graphql("{ __schema { queryType { name } mutationType { name } } }").dig("data", "__schema")
     assert_equal({ "queryType" => { "name" => "Query" }, "mutationType" => { "name" => "Mutation" } }, types)
   end
 
+  def test_fedcm_config_metadata_and_documentation_well_known
+    config_response = request(Net::HTTP::Get, "#{FEDCM}.json")
+    assert_equal "200", config_response.code
+    config = JSON.parse(config_response.body)
+    {
+      "issue" => %w[idtoken_endpoint id_token_endpoint id_assertion_endpoint],
+      "listaccounts" => %w[accounts_endpoint],
+      "clientmetadata" => %w[client_metadata_endpoint client_id_metadata_endpoint],
+      "signin" => %w[login_url signin_url],
+      "metrics" => %w[metrics_endpoint],
+      "revoke" => %w[revocation_endpoint disconnect_endpoint]
+    }.each do |path, keys|
+      keys.each { |key| assert_equal "#{ORIGIN}#{FEDCM}/#{path}", config.fetch(key) }
+    end
+    assert_equal "#15544d", config.dig("branding", "background_color")
+    assert_equal [32, 40], config.dig("branding", "icons").map { |icon| icon.fetch("size") }
+    assert_equal "image/svg+xml", request(Net::HTTP::Get, config.dig("branding", "icons", 0, "url")).content_type
+    assert_equal({ "include" => "n" }, config.fetch("accounts"))
+    assert_equal "n", config.fetch("account_label")
+    assert_equal true, config.fetch("supports_add_account")
+    assert_equal true, config.fetch("supports_use_other_account")
+    assert_equal %w[active button passive widget], config.fetch("modes").keys.sort
+    assert_equal "200", request(Net::HTTP::Get, config.fetch("login_url")).code
+    metadata_uri = "#{config.fetch('client_metadata_endpoint')}?client_id=#{client_id}"
+    metadata = JSON.parse(request(Net::HTTP::Get, metadata_uri, headers: FEDCM_HEADERS).body)
+    assert_equal({ "privacy_policy_url" => "#{ORIGIN}#{BASE}/privacy",
+                   "terms_of_service_url" => "#{ORIGIN}#{BASE}/terms" }, metadata)
+    metadata.each_value { |url| assert_equal "200", request(Net::HTTP::Get, url).code }
+    assert_fedcm_error request(Net::HTTP::Get, "#{FEDCM}/clientmetadata"), "400", "invalid_client"
+    well_known = request(Net::HTTP::Get, "#{IDP}/.well-known/web-identity")
+    assert_equal "200", well_known.code
+    assert_equal({ "provider_urls" => ["#{ORIGIN}#{FEDCM}.json"], "accounts_endpoint" => config.fetch("accounts_endpoint"),
+                   "login_url" => config.fetch("login_url") }, JSON.parse(well_known.body))
+    assert_equal "404", request(Net::HTTP::Get, "/.well-known/web-identity").code
+    client = request(Net::HTTP::Get, "#{IDP}/gsi/client")
+    assert_equal "application/javascript", client.content_type
+    assert_includes client.body, "navigator.credentials.get"
+    assert_equal "204", request(Net::HTTP::Post, "#{FEDCM}/metrics", headers: FEDCM_HEADERS).code
+  end
+
+  def test_keystone_login_cookie_accounts_status_and_sign_out
+    assert_fedcm_error request(Net::HTTP::Get, "#{FEDCM}/listaccounts"), "400", "invalid_request"
+    wrong_destination = request(Net::HTTP::Get, "#{FEDCM}/listaccounts",
+                                headers: { "Sec-Fetch-Site" => "cross-site", "Sec-Fetch-Dest" => "empty" })
+    assert_fedcm_error wrong_destination, "400", "invalid_request"
+    assert_equal [], fedcm_accounts
+    status_path = "#{IDP}/gsi/status?client_id=#{client_id}"
+    status = request(Net::HTTP::Get, status_path, headers: { "Origin" => ORIGIN })
+    assert_cors(status)
+    assert_equal({ "signed_in" => false }, JSON.parse(status.body))
+    assert_equal "400", request(Net::HTTP::Get, "#{IDP}/gsi/status?client_id=unknown").code
+    untrusted = request(Net::HTTP::Get, status_path, headers: { "Origin" => "https://other.test" })
+    assert_fedcm_error untrusted, "403", "unauthorized_client"
+    refute untrusted["access-control-allow-origin"]
+
+    assert_equal "403", request(Net::HTTP::Post, "#{IDP}/signin", form: { account: "alice@lab.test" }).code
+    idp_sign_in("bob@lab.test")
+    idp_sign_in("carol@lab.test")
+    idp_sign_in("bob@lab.test")
+    accounts = fedcm_accounts
+    assert_equal %w[bob@lab.test carol@lab.test], accounts.map { |account| account.fetch("email") }
+    account = accounts.first
+    assert_equal %w[approved_clients email given_name id label_hints login_hints name picture], account.keys.sort
+    assert_equal ["n"], account.fetch("label_hints")
+    assert_equal "Bob", account.fetch("given_name")
+    assert_includes account.fetch("login_hints"), "bob@lab.test"
+    assert_includes account.fetch("login_hints"), account.fetch("id")
+    picture = request(Net::HTTP::Get, account.fetch("picture"))
+    assert_equal "200", picture.code
+    assert_equal "image/svg+xml", picture.content_type
+    assert_includes picture.body, ">B</text>"
+    assert_equal "404", request(Net::HTTP::Get, "#{IDP}/gsi-static/avatar/unknown.svg").code
+    status = request(Net::HTTP::Get, status_path, headers: { "Origin" => ORIGIN })
+    assert_cors(status)
+    assert_equal({ "signed_in" => true }, JSON.parse(status.body))
+
+    bad_cookie = @cookies.fetch("keystone.accounts") + "bad"
+    tampered = request(Net::HTTP::Get, "#{FEDCM}/listaccounts",
+                       headers: FEDCM_HEADERS.merge("Cookie" => "keystone.accounts=#{bad_cookie}"))
+    assert_equal({ "accounts" => [] }, JSON.parse(tampered.body))
+    page = request(Net::HTTP::Get, "#{IDP}/signin")
+    assert_includes page.body, "Signed in to Keystone ID as Bob, Carol."
+    token = form_token(page.body, "#{IDP}/signout")
+    assert_equal "403", request(Net::HTTP::Post, "#{IDP}/signout", form: {}).code
+    signout = request(Net::HTTP::Post, "#{IDP}/signout", form: { authenticity_token: token })
+    assert_equal "303", signout.code
+    assert_equal "logged-out", signout["set-login"]
+    assert_match(/max-age=0/i, assert_idp_cookie(signout))
+    assert_equal [], fedcm_accounts
+  end
+
+  def test_fedcm_assertion_request_validation_and_claims
+    idp_sign_in("carol@lab.test")
+    account = fedcm_accounts.first
+    form = { client_id: client_id, account_id: account.fetch("id"), nonce: "rp-nonce",
+             disclosure_text_shown: "true", is_auto_selected: "false" }
+    revoked = request(Net::HTTP::Post, "#{FEDCM}/revoke", form: { client_id: client_id, account_hint: account.fetch("id") },
+                      headers: FEDCM_HEADERS)
+    assert_equal "200", revoked.code
+    assert_cors(revoked)
+    assert_empty fedcm_accounts.first.fetch("approved_clients")
+    assert_fedcm_error assertion(form, headers: { "Origin" => ORIGIN }), "400", "invalid_request"
+    assert_fedcm_error assertion(form.merge(client_id: "unknown")), "400", "invalid_client"
+    [nil, "https://elsewhere.test", "null"].each do |origin|
+      headers = FEDCM_HEADERS.dup
+      origin ? headers["Origin"] = origin : headers.delete("Origin")
+      other_origin = assertion(form, headers: headers)
+      assert_fedcm_error other_origin, "403", "unauthorized_client"
+      refute other_origin["access-control-allow-origin"]
+    end
+    unsigned = assertion(form.merge(account_id: alice_subject))
+    assert_fedcm_error unsigned, "400", "invalid_request"
+    assert_cors(unsigned)
+    assert_fedcm_error assertion(form.merge("nonce[]" => "array").reject { |key, _| key == :nonce }), "400", "invalid_request"
+
+    issued = assertion(form)
+    assert_equal "200", issued.code
+    assert_cors(issued)
+    assert_equal [client_id], fedcm_accounts.first.fetch("approved_clients")
+    jwks_response = request(Net::HTTP::Get, "#{IDP}/oauth2/v3/certs")
+    jwks = JWT::JWK::Set.new(JSON.parse(jwks_response.body))
+    jwt = JSON.parse(issued.body).fetch("token")
+    claims, header = JWT.decode(jwt, nil, true, algorithms: ["RS256"], jwks: jwks)
+    assert_equal({ "alg" => "RS256", "kid" => jwks.first.kid, "typ" => "JWT" }, header)
+    assert_equal %w[aud azp email email_verified exp family_name given_name iat iss jti name nbf nonce picture sub], claims.keys.sort
+    assert_equal ["https://accounts.google.com", client_id, client_id, account.fetch("id"), "carol@lab.test", true,
+                  "Carol", account.fetch("picture"), "Carol", "", "rp-nonce"],
+                 claims.values_at("iss", "azp", "aud", "sub", "email", "email_verified", "name", "picture", "given_name",
+                                  "family_name", "nonce")
+    assert_equal claims.fetch("iat"), claims.fetch("nbf")
+    assert_equal 3600, claims.fetch("exp") - claims.fetch("iat")
+    next_token = JSON.parse(assertion(form.reject { |key, _| key == :nonce }).body).fetch("token")
+    next_claims = JWT.decode(next_token, nil, true, algorithms: ["RS256"], jwks: jwks).first
+    refute_empty next_claims.fetch("nonce")
+    refute_equal claims.fetch("nonce"), next_claims.fetch("nonce")
+    refute_equal claims.fetch("jti"), next_claims.fetch("jti")
+  end
+
+  def test_fallback_requires_same_origin_browser_fetch
+    path = "#{IDP}/gsi/fallback/listaccounts"
+    assert_fedcm_error request(Net::HTTP::Get, path), "403", "invalid_request"
+    assert_fedcm_error request(Net::HTTP::Get, path, headers: FALLBACK_HEADERS.merge("Sec-Fetch-Site" => "cross-site")),
+                       "403", "invalid_request"
+    idp_sign_in("alice@lab.test")
+    response = request(Net::HTTP::Get, path, headers: FALLBACK_HEADERS)
+    assert_equal "200", response.code
+    assert_equal fedcm_accounts, JSON.parse(response.body).fetch("accounts")
+    issue = "#{IDP}/gsi/fallback/issue"
+    form = { client_id: client_id, account_id: alice_subject }
+    assert_fedcm_error request(Net::HTTP::Post, issue, form: form, headers: FEDCM_HEADERS), "403", "invalid_request"
+    assert_fedcm_error request(Net::HTTP::Post, issue, form: form, headers: FALLBACK_HEADERS.merge("Origin" => "https://other.test")),
+                       "403", "unauthorized_client"
+    response = request(Net::HTTP::Post, issue, form: form, headers: FALLBACK_HEADERS)
+    assert_equal "200", response.code
+    assert_cors(response)
+    refute_empty JSON.parse(response.body).fetch("token")
+  end
+
+  def test_lumora_exposes_the_csrf_cookie_and_nonce_protected_consent_template
+    home = get_home
+    header = home["content-security-policy"]
+    nonce = header[/script-src 'nonce-([^']+)'/, 1]
+    refute_nil nonce
+    assert_includes home.body, %(<script nonce="#{nonce}" src="#{BASE}/assets/app.js")
+    assert_includes home.body, '<template id="one-tap-settings">'
+    assert_includes home.body, 'data-ux_mode="popup" data-callback="handleOneTapCredential"'
+    refute_includes home.body, 'data-nonce'
+    assert_includes home.body, '>Agree</button>'
+    csrftoken = home.get_fields("set-cookie").find { |cookie| cookie.start_with?("csrftoken=") }
+    assert_match(/; path=#{Regexp.escape(BASE)}(?:;|$)/i, csrftoken)
+    assert_match(/; secure(?:;|$)/i, csrftoken)
+    assert_match(/; samesite=lax(?:;|$)/i, csrftoken)
+    refute_match(/httponly/i, csrftoken)
+    assert_equal graphql_token(home.body), URI.decode_www_form_component(@cookies.fetch("csrftoken"))
+    signin = request(Net::HTTP::Get, "#{BASE}/signin")
+    refute_equal header, signin["content-security-policy"]
+    sign_in
+    refute_includes get_home.body, 'g_id_onload'
+    refute_includes request(Net::HTTP::Get, "#{BASE}/account").body, 'g_id_onload'
+    refute_includes request(Net::HTTP::Get, "#{BASE}/signin").body, 'g_id_onload'
+  end
+
+  def test_persisted_graphql_transport_and_get_mutation_restriction
+    manifest = persisted_manifest
+    operation_files = Dir.glob(File.join(ROOT, "operations", "*.graphql"))
+    assert_equal operation_files.size, manifest.size
+    operation_files.each do |file|
+      assert_equal "Lumora/#{Digest::SHA256.file(file).hexdigest}", manifest.fetch(File.basename(file, ".graphql"))
+    end
+    account = { extensions: { operationId: manifest.fetch("AccountQuery") } }
+    assert_equal({ "data" => { "currentUser" => nil } }, graphql_request(account))
+    sign_in
+    token = graphql_token(get_home.body)
+    form = { "extensions[operationId]" => manifest.fetch("UpdateProfile"),
+             "variables" => JSON.generate(input: { name: "Alice" }) }
+    response = request(Net::HTTP::Post, GRAPHQL, form: form, headers: { "X-CSRF-Token" => token })
+    assert_equal "200", response.code, response.body
+    assert_equal "Alice", JSON.parse(response.body).dig("data", "updateProfile", "currentUser", "name")
+    get_vars = URI.encode_www_form(form)
+    mutation = request(Net::HTTP::Get, "#{GRAPHQL}?#{get_vars}")
+    assert_equal "403", mutation.code
+    assert_equal "text/html", mutation.content_type
+    raw_mutation = URI.encode_www_form(query: "mutation SignOut { signOut { success } }")
+    assert_equal "403", request(Net::HTTP::Get, "#{GRAPHQL}?#{raw_mutation}").code
+    assert_equal "403", request(Net::HTTP::Head, "#{GRAPHQL}?#{raw_mutation}").code
+    assert_equal true, me.fetch("signed_in")
+    get_query = URI.encode_www_form("extensions[operationId]" => manifest.fetch("AccountQuery"))
+    assert_equal "Alice", JSON.parse(request(Net::HTTP::Get, "#{GRAPHQL}?#{get_query}").body).dig("data", "currentUser", "name")
+
+    no_query = { "errors" => [{ "message" => "No query string was present" }] }
+    assert_equal no_query, graphql_request({})
+    assert_equal no_query, graphql_request({ query: " " })
+    assert_equal no_query, graphql_request({ extensions: { operationId: "Lumora/unknown" } })
+    plain = request(Net::HTTP::Post, GRAPHQL, headers: { "Content-Type" => "text/plain" }, body: JSON.generate(account))
+    assert_equal "200", plain.code
+    assert_equal no_query, JSON.parse(plain.body)
+    assert_equal "400", request(Net::HTTP::Post, GRAPHQL, form: form.merge("variables" => "{")).code
+    assert_equal({ "data" => { "currentUser" => { "name" => "Alice" } } }, graphql("{ currentUser { name } }"))
+    sign_out = { operationName: "SignOut", extensions: { operationId: manifest.fetch("SignOut") } }
+    unverified = request(Net::HTTP::Post, GRAPHQL, form: { "extensions[operationId]" => manifest.fetch("SignOut"),
+                                                          "authenticity_token" => token })
+    assert_equal "UNAUTHENTICATED", graphql_error(JSON.parse(unverified.body))
+    refute session_cookie(unverified)
+    assert_equal true, me.fetch("signed_in")
+    assert_equal({ "data" => { "signOut" => { "success" => true } } }, graphql_request(sign_out, token: token))
+    assert_equal false, me.fetch("signed_in")
+  end
+
+  def test_oauth_sign_in_uses_the_same_user_and_a_throwaway_session_without_csrf
+    sign_in
+    redirect_user = me.fetch("user")
+    token = JSON.parse(assertion(client_id: client_id, account_id: alice_subject).body).fetch("token")
+    @cookies.clear
+    csrf = graphql_token(get_home.body)
+    [nil, "wrong"].each do |invalid|
+      payload = oauth_sign_in(token, csrf: invalid)
+      assert_equal "User:#{redirect_user.fetch('id')}", payload.dig("currentUser", "id")
+      assert_nil payload.fetch("otpSessionChallenge")
+      assert_empty payload.fetch("errors")
+      refute session_cookie(@last_graphql_response)
+      assert_equal false, me.fetch("signed_in")
+    end
+    assert_empty oauth_sign_in(token, csrf: csrf).fetch("errors")
+    assert session_cookie(@last_graphql_response)
+    assert_equal redirect_user, me.fetch("user")
+
+    idp_sign_in("carol@lab.test")
+    carol = fedcm_accounts.find { |account| account["email"] == "carol@lab.test" }
+    carol_jwt = JSON.parse(assertion(client_id: client_id, account_id: carol.fetch("id")).body).fetch("token")
+    assert_equal "carol@lab.test", oauth_sign_in(carol_jwt).dig("currentUser", "email")
+    refute session_cookie(@last_graphql_response)
+    assert_equal redirect_user, me.fetch("user")
+  end
+
+  def test_oauth_sign_in_returns_the_stock_verifier_messages
+    csrf = graphql_token(get_home.body)
+    %w[FACEBOOK APPLE].each do |provider|
+      result = oauth_sign_in("unused", csrf: csrf, provider: provider, platform: "IOS")
+      assert_nil result.fetch("currentUser")
+      assert_equal "UNSUPPORTED_PROVIDER", result.dig("errors", 0, "code")
+    end
+    key = OpenSSL::PKey::RSA.new(File.read(File.join(self.class.directory, "idp-key.pem")))
+    claims = { iss: "https://accounts.google.com", aud: client_id, sub: alice_subject,
+               email: "alice@lab.test", name: "Alice", exp: Time.now.to_i + 3600 }
+    tests = {
+      "malformed" => "Token not verified as issued by Google",
+      JWT.encode(claims, OpenSSL::PKey::RSA.generate(2048), "RS256") => "Token not verified as issued by Google",
+      JWT.encode(claims.merge(aud: "another-client"), key, "RS256") => "Token audience mismatch",
+      JWT.encode(claims.merge(iss: "https://other.test"), key, "RS256") => "Token issuer mismatch",
+      JWT.encode(claims.merge(exp: Time.now.to_i - 1), key, "RS256") => "Token signature is expired"
+    }
+    tests.each do |token, message|
+      result = oauth_sign_in(token, csrf: csrf, platform: "ANDROID")
+      assert_nil result.fetch("currentUser")
+      assert_nil result.fetch("otpSessionChallenge")
+      assert_equal [{ "code" => "INVALID_ID_TOKEN", "message" => "Invalid ID Token: #{message}" }], result.fetch("errors")
+    end
+    assert_equal false, me.fetch("signed_in")
+  end
+
   private
+
+  def session_cookie(response)
+    response.get_fields("set-cookie").to_a.find { |cookie| cookie.start_with?("lab.session=") }
+  end
+
+  def assert_idp_cookie(response)
+    cookie = response.get_fields("set-cookie").to_a.find { |entry| entry.start_with?("keystone.accounts=") }
+    refute_nil cookie
+    assert_match(/; path=#{Regexp.escape(IDP)}(?:;|$)/i, cookie)
+    assert_match(/; secure(?:;|$)/i, cookie)
+    assert_match(/; httponly(?:;|$)/i, cookie)
+    assert_match(/; samesite=none(?:;|$)/i, cookie)
+    cookie
+  end
+
+  def assert_cors(response)
+    assert_equal ORIGIN, response["access-control-allow-origin"]
+    assert_equal "true", response["access-control-allow-credentials"]
+    assert_equal "Origin", response["vary"]
+  end
+
+  def assert_fedcm_error(response, status, code)
+    assert_equal status, response.code, response.body
+    assert_equal({ "error" => { "code" => code, "url" => "#{ORIGIN}#{IDP}/signin" } }, JSON.parse(response.body))
+  end
+
+  def client_id
+    JSON.parse(File.read(File.join(self.class.directory, "client.json"))).fetch("client_id")
+  end
+
+  def idp_sign_in(email)
+    path = "#{IDP}/signin"
+    page = request(Net::HTTP::Get, path)
+    token = form_token(page.body, path)
+    response = request(Net::HTTP::Post, path, form: { account: email, authenticity_token: token })
+    assert_equal "303", response.code, response.body
+    assert_equal "logged-in", response["set-login"]
+    assert_idp_cookie(response)
+  end
+
+  def fedcm_accounts
+    response = request(Net::HTTP::Get, "#{FEDCM}/listaccounts", headers: { "Sec-Fetch-Dest" => "webidentity" })
+    assert_equal "200", response.code
+    JSON.parse(response.body).fetch("accounts")
+  end
+
+  def assertion(form = nil, headers: FEDCM_HEADERS, **fields)
+    request(Net::HTTP::Post, "#{FEDCM}/issue", headers: headers, form: form || fields)
+  end
+
+  def persisted_manifest
+    response = request(Net::HTTP::Get, "#{BASE}/persisted.json")
+    assert_equal "200", response.code
+    JSON.parse(response.body)
+  end
+
+  def graphql_request(payload, token: nil)
+    headers = { "Content-Type" => "application/json" }
+    headers["X-CSRF-Token"] = token if token
+    @last_graphql_response = request(Net::HTTP::Post, GRAPHQL, headers: headers, body: JSON.generate(payload))
+    assert_equal "200", @last_graphql_response.code, @last_graphql_response.body
+    JSON.parse(@last_graphql_response.body)
+  end
+
+  def oauth_sign_in(token, csrf: nil, provider: "GOOGLE_OAUTH2", platform: "WEB")
+    id = persisted_manifest.fetch(OAUTH_OPERATION)
+    payload = { operationName: OAUTH_OPERATION, extensions: { operationId: id },
+                variables: { input: { idToken: token, provider: provider, platform: platform } } }
+    graphql_request(payload, token: csrf).fetch("data").fetch("signInWithOauth")
+  end
 
   def request(method, path, form: nil, authorization: nil, accept: nil, headers: {}, body: nil)
     uri = URI.join(ORIGIN, path.to_s)
@@ -417,7 +783,8 @@ class FlowTest < Minitest::Test
     req = method.new(uri.request_uri)
     req["Host"] = uri.host
     req["X-Forwarded-Proto"] = "https"
-    req["Cookie"] = @cookie if @cookie
+    cookies = @cookies.reject { |name, _| name == "keystone.accounts" && !uri.path.start_with?("#{IDP}/") }
+    req["Cookie"] = cookies.map { |name, value| "#{name}=#{value}" }.join("; ") unless cookies.empty?
     req["Authorization"] = authorization if authorization
     req["Accept"] = accept if accept
     headers.each { |key, value| req[key] = value }
@@ -429,7 +796,10 @@ class FlowTest < Minitest::Test
     end
 
     response = self.class.http.request(req)
-    @cookie = response["set-cookie"].split(";", 2).first if response["set-cookie"]
+    response.get_fields("set-cookie").to_a.each do |cookie|
+      name, value = cookie.split(";", 2).first.split("=", 2)
+      value.empty? ? @cookies.delete(name) : @cookies[name] = value
+    end
     response
   end
 
@@ -444,7 +814,7 @@ class FlowTest < Minitest::Test
   end
 
   def form_token(html, path)
-    form = html[/<form method="post" action="#{Regexp.escape(path)}">(.*?)<\/form>/m, 1]
+    form = html[/<form\b[^>]*\bmethod="post" action="#{Regexp.escape(path)}"[^>]*>(.*?)<\/form>/m, 1]
     refute_nil form
     token = form[/name="authenticity_token" value="([^"]+)"/, 1]
     refute_nil token
@@ -479,6 +849,8 @@ class FlowTest < Minitest::Test
     choice.query = URI.encode_www_form(fields.merge("account" => email))
     response = request(Net::HTTP::Get, choice)
     assert_equal "302", response.code
+    assert_equal "logged-in", response["set-login"]
+    assert_idp_cookie(response)
     callback = URI(response.fetch("location"))
     assert_equal CALLBACK, "#{callback.origin}#{callback.path}"
     assert_equal query(authorize_url).fetch("state"), query(callback).fetch("state")
@@ -494,7 +866,7 @@ class FlowTest < Minitest::Test
     headers = { "Content-Type" => "application/json" }
     headers["X-CSRF-Token"] = token if token
     body = JSON.generate(query: query, variables: variables, operationName: operation_name)
-    response = request(Net::HTTP::Post, GRAPHQL, headers: headers, body: body)
+    response = @last_graphql_response = request(Net::HTTP::Post, GRAPHQL, headers: headers, body: body)
     assert_equal "200", response.code, response.body
     assert_equal "application/json", response.content_type
     JSON.parse(response.body)

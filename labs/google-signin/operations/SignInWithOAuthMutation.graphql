@@ -1,0 +1,7 @@
+mutation SignInWithOAuthMutation($input: signInWithOAuthInput!) {
+  signInWithOauth(input: $input) {
+    currentUser { id name email }
+    otpSessionChallenge
+    errors { code message }
+  }
+}

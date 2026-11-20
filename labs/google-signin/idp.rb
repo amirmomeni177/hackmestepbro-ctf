@@ -4,6 +4,7 @@ require "base64"
 require "faraday"
 require "jwt"
 require "rack/auth/basic"
+require_relative "fedcm"
 
 module Lab
   class MockTransport < Faraday::Middleware
@@ -81,6 +82,18 @@ module Lab
       find_token(@access_tokens, access_token)&.fetch(:account)
     end
 
+    def assertion(account:, client_id:, nonce:, picture:)
+      now = Time.now.to_i
+      given_name = account.fetch("given_name")
+      claims = {
+        iss: ISSUER, azp: client_id, aud: client_id, sub: account.fetch("sub"), email: account.fetch("email"),
+        email_verified: true, nbf: now, name: account.fetch("name"), picture: picture, given_name: given_name,
+        family_name: account.fetch("family_name", account.fetch("name").delete_prefix(given_name).strip),
+        iat: now, exp: now + TOKEN_TTL, jti: SecureRandom.uuid, nonce: nonce || SecureRandom.urlsafe_base64(32)
+      }
+      JWT.encode(claims, @signing_key, "RS256", kid: @kid, typ: "JWT")
+    end
+
     def tokeninfo(access_token:, id_token:)
       record = id_token ? find_token(@id_tokens, id_token) : find_token(@access_tokens, access_token)
       return unless record
@@ -110,6 +123,9 @@ module Lab
   class MockIdentityProvider < WebApp
     set :brand, "Keystone ID"
     set :theme, "keystone"
+    # FedCM routes validate request metadata and any required Origin directly.
+    set :protection, allow_if: ->(env) { FedCM::REQUEST_PATHS.include?(env["PATH_INFO"]) }
+    register FedCM
 
     AUTHORIZE_FIELDS = %w[client_id redirect_uri response_type scope state].freeze
 
@@ -127,6 +143,7 @@ module Lab
         authorization_error("invalid_scope") unless scope.nil? || scope.is_a?(String)
         code = settings.grants.authorize(account: account, client_id: params["client_id"],
                                          redirect_uri: params["redirect_uri"], scope: scope || "email profile")
+        remember_idp_account(account)
         redirect authorization_result(code: code)
       end
 
@@ -152,6 +169,8 @@ module Lab
                                                  redirect_uri: form["redirect_uri"])
       halt 400, json(error: error.to_s) if error
 
+      account = settings.grants.userinfo(response.fetch(:access_token))
+      settings.data.set_approval(account.fetch("sub"), client_id, approved: true)
       json(response)
     end
 
@@ -193,6 +212,7 @@ module Lab
 
       def json(data)
         content_type :json
+        headers "X-Content-Type-Options" => "nosniff"
         JSON.generate(data)
       end
 

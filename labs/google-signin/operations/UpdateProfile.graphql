@@ -1,0 +1,6 @@
+mutation UpdateProfile($input: UpdateProfileInput!) {
+  updateProfile(input: $input) {
+    currentUser { name email signInProvider }
+    errors { path message }
+  }
+}

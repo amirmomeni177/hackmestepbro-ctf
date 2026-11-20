@@ -5,7 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <% if defined?(csrf_token) %>
     <meta name="csrf-token" content="<%= escape(csrf_token) %>">
-    <script src="<%= escape(Lab::ASSETS_PATH) %>/workspace.js" defer></script>
+  <% end %>
+  <% if defined?(app_script) && app_script %>
+    <script nonce="<%= escape(@script_nonce) %>" src="<%= escape(Lab::ASSETS_PATH) %>/app.js" defer></script>
+  <% end %>
+  <% if defined?(app_script) && app_script && !(defined?(one_tap) && one_tap) %>
+    <script nonce="<%= escape(@script_nonce) %>" src="<%= escape(Lab::ASSETS_PATH) %>/workspace.js?v=<%= escape(Lab::WORKSPACE_JS_VERSION) %>" defer></script>
   <% end %>
   <title><%= escape(settings.brand) %> — <%= escape(title) %></title>
   <link rel="icon" type="image/svg+xml" href="<%= escape(Lab::ASSETS_PATH) %>/<%= escape(settings.theme) %>.svg">
@@ -39,5 +44,16 @@
     </symbol>
   </svg>
   <%= yield %>
+  <% if defined?(one_tap) && one_tap %>
+    <template id="one-tap-settings">
+      <div id="g_id_onload" data-client_id="<%= escape(settings.data.client.fetch('client_id')) %>"
+           data-ux_mode="popup" data-callback="handleOneTapCredential" data-auto_select="false" data-itp_support="true"></div>
+    </template>
+    <aside id="tracking-consent" class="tracking-consent" aria-label="Cookie consent" hidden>
+      <p>Allow cookies for One Tap sign-in with Keystone ID.</p>
+      <button class="button button-primary" type="button">Agree</button>
+    </aside>
+    <p id="one-tap-error" class="one-tap-error" role="alert" hidden></p>
+  <% end %>
 </body>
 </html>

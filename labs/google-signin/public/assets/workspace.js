@@ -2,26 +2,9 @@
   const workspace = document.querySelector("[data-workspace-page]");
   if (!workspace) return;
 
-  const BASE = workspace.dataset.base;
-  const profileFields = `name email signInProvider`;
+  const graphql = window.lumoraGraphQL;
   const dates = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
   const graphemes = typeof Intl.Segmenter === "function" ? new Intl.Segmenter() : null;
-
-  async function graphql(query, operationName, variables, csrfToken) {
-    const headers = { "Content-Type": "application/json" };
-    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
-
-    const response = await fetch(BASE + "/graphql", {
-      method: "POST",
-      credentials: "same-origin",
-      headers,
-      body: JSON.stringify({ query, operationName, variables })
-    });
-    const result = await response.json();
-    if (result.errors?.length) throw new Error(result.errors.map(error => error.message).join(" "));
-    if (!response.ok) throw new Error("Lumora could not complete the request. Try again.");
-    return result.data;
-  }
 
   function nameParts(name) {
     return name.split(/\p{White_Space}+/u).filter(Boolean);
@@ -53,14 +36,7 @@
   }
 
   async function loadDashboard() {
-    const { currentUser } = await graphql(`query DashboardQuery {
-      currentUser {
-        ${profileFields}
-        workspace { name }
-        boards(first: 3) { title assetsCount updatedAt coverHue }
-        activity(first: 3) { actorName verb boardTitle at }
-      }
-    }`, "DashboardQuery");
+    const { currentUser } = await graphql("DashboardQuery");
     if (!currentUser) return;
 
     renderProfile(currentUser);
@@ -93,7 +69,6 @@
     const fieldset = form.querySelector("fieldset");
     const input = form.elements.namedItem("name");
     const status = form.querySelector("[role=status]");
-    const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     form.querySelector("#display-name-note").hidden = true;
 
     form.addEventListener("submit", async event => {
@@ -105,12 +80,7 @@
       status.classList.remove("is-error");
 
       try {
-        const { updateProfile } = await graphql(`mutation UpdateProfile($input: UpdateProfileInput!) {
-          updateProfile(input: $input) {
-            currentUser { ${profileFields} }
-            errors { path message }
-          }
-        }`, "UpdateProfile", { input: { name } }, csrfToken);
+        const { updateProfile } = await graphql("UpdateProfile", { input: { name } });
 
         if (updateProfile.errors.length) {
           input.setAttribute("aria-invalid", "true");
@@ -128,9 +98,7 @@
     });
 
     try {
-      const { currentUser } = await graphql(`query AccountQuery {
-        currentUser { ${profileFields} }
-      }`, "AccountQuery");
+      const { currentUser } = await graphql("AccountQuery");
       if (currentUser) {
         renderProfile(currentUser);
         input.value = currentUser.name;

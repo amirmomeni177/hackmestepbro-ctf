@@ -1,0 +1,31 @@
+<main id="main-content" class="wrap keystone-page" tabindex="-1">
+  <section class="keystone-card" aria-labelledby="provider-title">
+    <header class="keystone-header">
+      <div class="keystone-brand"><span class="provider-mark"><%= icon("keystone") %></span> Keystone ID</div>
+      <h1 id="provider-title">Sign in to Keystone ID</h1>
+    </header>
+
+    <form class="accounts" method="post" action="<%= escape(Lab::IDP_SIGNIN_PATH) %>">
+      <input type="hidden" name="authenticity_token" value="<%= escape(signin_token) %>">
+      <% accounts.each do |email, account| %>
+        <% name = account.fetch("name") %>
+        <button class="account" type="submit" name="account" value="<%= escape(email) %>">
+          <span class="avatar" aria-hidden="true"><%= escape(initials(name)) %></span>
+          <span class="account-details"><strong><%= escape(name) %></strong><span><%= escape(email) %></span></span>
+          <%= icon("chevron") %>
+        </button>
+      <% end %>
+    </form>
+
+    <div class="scope-details">
+      <% unless signed_in.empty? %>
+        <p>Signed in to Keystone ID as <%= escape(signed_in.map { |account| account.fetch("name") }.join(", ")) %>.</p>
+        <form method="post" action="<%= escape(Lab::IDP_PATH) %>/signout">
+          <input type="hidden" name="authenticity_token" value="<%= escape(signout_token) %>">
+          <button class="button" type="submit">Sign out of Keystone ID</button>
+        </form>
+      <% end %>
+      <a class="back-link" href="<%= escape(Lab::HOME_PATH) %>">Return to Lumora <%= icon("arrow") %></a>
+    </div>
+  </section>
+</main>

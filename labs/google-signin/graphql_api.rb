@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
+require "digest"
 require "graphql"
+require "google-id-token"
+require "json"
 require_relative "workspace_data"
 
 module Lab
@@ -10,18 +13,14 @@ module Lab
 
     class AuthenticityToken < Rack::Protection::AuthenticityToken
       def accepts?(env)
-        # The mutation resolver checks the header after GraphQL selects the operation.
+        # GraphQL applies null-session semantics after selecting the operation.
         return true if env["REQUEST_METHOD"] == "POST" && env["PATH_INFO"] == PATH
 
         super
       end
-
-      def valid_header?(env)
-        session(env)[options[:key]] && valid_token?(env, env["HTTP_X_CSRF_TOKEN"])
-      end
     end
 
-    TOKEN_VALIDATOR = AuthenticityToken.new(nil)
+    HEADER_VALIDATOR = Rack::Protection::AuthenticityToken.new(nil, authenticity_param: nil)
 
     def self.require_user(context)
       context[:user] || raise(GraphQL::ExecutionError.new("Sign in to continue.", extensions: { code: "UNAUTHENTICATED" }))
@@ -82,6 +81,7 @@ module Lab
     end
 
     class UserError < GraphQL::Schema::Object
+      field :code, String, null: false
       field :path, [String]
       field :message, String, null: false
     end
@@ -95,10 +95,6 @@ module Lab
 
       def ready?(**)
         GraphQLAPI.require_user(context)
-        unless context[:csrf_valid].call
-          raise GraphQL::ExecutionError.new("Invalid CSRF token.", extensions: { code: "INVALID_CSRF_TOKEN" })
-        end
-
         true
       end
     end
@@ -111,7 +107,7 @@ module Lab
       def resolve(input:)
         name = input.name.gsub(/\A[[:space:]]+|[[:space:]]+\z/, "")
         unless (1..60).cover?(name.length)
-          return { errors: [{ path: %w[input name], message: "Display name must be 1 to 60 characters." }] }
+          return { errors: [{ code: "INVALID_NAME", path: %w[input name], message: "Display name must be 1 to 60 characters." }] }
         end
 
         user = context[:update_name].call(name)
@@ -130,9 +126,50 @@ module Lab
       end
     end
 
+    class OAuthProvider < GraphQL::Schema::Enum
+      value "GOOGLE_OAUTH2"
+      value "FACEBOOK"
+      value "APPLE"
+    end
+
+    class Platform < GraphQL::Schema::Enum
+      value "WEB"
+      value "IOS"
+      value "ANDROID"
+    end
+
+    class SignInWithOAuthInput < GraphQL::Schema::InputObject
+      graphql_name "signInWithOAuthInput"
+      argument :id_token, String, required: true
+      argument :provider, OAuthProvider, required: true
+      argument :platform, Platform, required: false
+    end
+
+    class SignInWithOAuth < GraphQL::Schema::Mutation
+      graphql_name "SignInWithOAuthMutation"
+      null false
+      argument :input, SignInWithOAuthInput, required: true
+      field :current_user, CurrentUser
+      field :otp_session_challenge, String
+      field :errors, [UserError], null: false
+
+      def resolve(input:)
+        if input.provider != "GOOGLE_OAUTH2"
+          return { errors: [{ code: "UNSUPPORTED_PROVIDER", message: "This sign-in provider is unavailable." }] }
+        end
+
+        user = context[:oauth_sign_in].call(input.id_token)
+        context[:user] = WorkspaceData.new(user)
+        { current_user: context[:user], errors: [] }
+      rescue GoogleIDToken::ValidationError, GoogleIDToken::CertificateError => error
+        { errors: [{ code: "INVALID_ID_TOKEN", message: "Invalid ID Token: #{error.message}" }] }
+      end
+    end
+
     class Mutation < GraphQL::Schema::Object
       field :update_profile, mutation: UpdateProfile
       field :sign_out, mutation: SignOut
+      field :sign_in_with_oauth, mutation: SignInWithOAuth
     end
 
     class Schema < GraphQL::Schema
@@ -144,5 +181,13 @@ module Lab
     end
 
     SDL = Schema.to_definition.freeze
+
+    OPERATIONS = Dir.glob(File.join(__dir__, "operations", "*.graphql")).to_h do |file|
+      query = File.read(file)
+      name = File.basename(file, ".graphql")
+      [name, { "id" => "Lumora/#{Digest::SHA256.hexdigest(query)}", "query" => query }]
+    end.freeze
+    PERSISTED_QUERIES = OPERATIONS.values.to_h { |entry| entry.values_at("id", "query") }.freeze
+    MANIFEST = JSON.generate(OPERATIONS.transform_values { |entry| entry.fetch("id") }).freeze
   end
 end

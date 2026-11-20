@@ -16,6 +16,7 @@ module Lab
   SIGNIN_PATH = "#{BASE}/signin"
   ACCOUNT_PATH = "#{BASE}/account"
   IDP_PATH = "#{BASE}/idp"
+  IDP_SIGNIN_PATH = "#{IDP_PATH}/signin"
   AUTHORIZE_PATH = "#{IDP_PATH}/o/oauth2/auth"
   AUTH_PREFIX = "#{BASE}/users/auth"
   STRATEGY = "google_oauth2"
@@ -24,6 +25,7 @@ module Lab
   ASSETS_PATH = "#{BASE}/assets"
   PUBLIC_DIR = File.join(__dir__, "public")
   CSS_VERSION = Digest::SHA256.file(File.join(PUBLIC_DIR, "assets", "lab.css")).hexdigest[0, 12].freeze
+  WORKSPACE_JS_VERSION = Digest::SHA256.file(File.join(PUBLIC_DIR, "assets", "workspace.js")).hexdigest[0, 12].freeze
   PORT = Integer(ENV.fetch("PORT", "18320"))
   public_origin = ENV["PUBLIC_ORIGIN"].to_s
   public_origin = "https://ctf.hackmestepbro.com" if public_origin.empty?
@@ -35,11 +37,12 @@ module Lab
   end
 
   class Data
-    attr_reader :secret, :client, :accounts, :signing_key
+    attr_reader :secret, :client, :accounts, :signing_key, :signing_certificate
 
     def initialize(directory)
       @directory = directory
       @users_path = File.join(directory, "users.json")
+      @approvals_path = File.join(directory, "idp-approvals.json")
       FileUtils.mkdir_p(directory, mode: 0o700)
 
       with_lock do
@@ -47,11 +50,13 @@ module Lab
         client_json = load_or_create("client.json") do
           JSON.generate(client_id: "lab-#{SecureRandom.hex(16)}", client_secret: SecureRandom.hex(32))
         end
-        @client = JSON.parse(client_json)
+        @client = JSON.parse(client_json).merge("origin" => PUBLIC_ORIGIN)
         @accounts = JSON.parse(load_or_create("idp-accounts.json") { JSON.generate(seed_accounts) })
         key_pem = load_or_create("idp-key.pem") { OpenSSL::PKey::RSA.generate(2048).to_pem }
         @signing_key = OpenSSL::PKey::RSA.new(key_pem)
+        @signing_certificate = certificate_for(@signing_key)
         load_or_create("users.json") { "{}" }
+        load_or_create("idp-approvals.json") { "{}" }
       end
     end
 
@@ -89,7 +94,35 @@ module Lab
       end
     end
 
+    def approved_clients
+      JSON.parse(File.read(@approvals_path))
+    end
+
+    def set_approval(subject, client_id, approved:)
+      with_lock do
+        approvals = approved_clients
+        clients = approvals.fetch(subject, [])
+        updated = approved ? clients | [client_id] : clients - [client_id]
+        if updated != clients
+          approvals[subject] = updated
+          write(@approvals_path, JSON.generate(approvals))
+        end
+      end
+    end
+
     private
+
+    def certificate_for(key)
+      certificate = OpenSSL::X509::Certificate.new
+      certificate.version = 2
+      certificate.serial = 1
+      certificate.subject = certificate.issuer = OpenSSL::X509::Name.parse("/CN=Keystone ID")
+      certificate.public_key = key.public_key
+      certificate.not_before = Time.now - 60
+      certificate.not_after = Time.now + 86_400
+      certificate.sign(key, OpenSSL::Digest::SHA256.new)
+      certificate
+    end
 
     def seed_accounts
       subjects = []
@@ -142,6 +175,10 @@ module Lab
     error(500) { error_page("Internal server error", "The lab could not complete the request.") }
 
     helpers do
+      def local_action_token(path)
+        Rack::Protection::AuthenticityToken.token(session, path: path)
+      end
+
       def escape(value)
         Rack::Utils.escape_html(value.to_s)
       end
@@ -170,21 +207,27 @@ module Lab
   end
 
   class RelyingParty < WebApp
+    # GraphQL applies its own CSRF handling after identifying the operation.
+    set :protection, allow_if: ->(env) { env["REQUEST_METHOD"] == "POST" && env["PATH_INFO"] == GraphQLAPI::PATH }
     use GraphQLAPI::AuthenticityToken
 
-    before { cache_control :no_store }
+    before do
+      cache_control :no_store
+      @script_nonce = SecureRandom.base64(24)
+      headers "Content-Security-Policy" => "script-src 'nonce-#{@script_nonce}'; object-src 'none'; base-uri 'none'"
+    end
 
     get "/" do
       user = settings.data.user(session["user_id"])
       if user
         workspace_page(user, title: "Home", section: :dashboard, error: params["error"])
       else
-        page :home, title: "Creative workspace", error: params["error"]
+        sign_in_page(:home, title: "Creative workspace", error: params["error"])
       end
     end
 
     get "/signin" do
-      page :signin, title: "Sign in", error: params["error"]
+      sign_in_page(:signin, title: "Sign in", error: params["error"])
     end
 
     get "/account" do
@@ -221,8 +264,11 @@ module Lab
     end
 
     get GraphQLAPI::PATH do
-      headers "Allow" => "POST"
-      graphql_request_error(405, "Use POST for GraphQL requests.")
+      if request.GET.empty?
+        headers "Allow" => "POST"
+        graphql_request_error(405, "Use POST for GraphQL requests.")
+      end
+      execute_graphql(request.GET, form: true)
     end
 
     get "#{GraphQLAPI::PATH}/schema" do
@@ -230,32 +276,39 @@ module Lab
       GraphQLAPI::SDL
     end
 
+    get "/persisted.json" do
+      content_type :json
+      GraphQLAPI::MANIFEST
+    end
+
+    %w[privacy terms].each do |document|
+      get "/#{document}" do
+        page :policy, title: document == "privacy" ? "Privacy policy" : "Terms of service", document: document
+      end
+    end
+
     post GraphQLAPI::PATH do
       content_type :json
       limit = GraphQLAPI::MAX_BODY_BYTES
       graphql_request_error(413, "GraphQL requests cannot exceed 16 KB.") if request.content_length.to_i > limit
 
-      raw = request.body.read(limit + 1).to_s.force_encoding(Encoding::UTF_8)
+      request.body.rewind
+      raw = request.body.read(limit + 1) || +""
+      raw.force_encoding(Encoding::UTF_8)
       graphql_request_error(413, "GraphQL requests cannot exceed 16 KB.") if raw.bytesize > limit
-      graphql_request_error(415, "Use application/json for GraphQL requests.") unless request.media_type == "application/json"
-      graphql_request_error(400, "Invalid JSON request.") unless raw.valid_encoding?
-      payload = JSON.parse(raw)
-      query, variables, operation = payload.values_at("query", "variables", "operationName") if payload.is_a?(Hash)
-      unless query.is_a?(String) && (variables.nil? || variables.is_a?(Hash)) && (operation.nil? || operation.is_a?(String))
-        graphql_request_error(400, "Expected a query string, an optional variables object, and an optional operationName string.")
+      case request.media_type
+      when "application/json"
+        graphql_request_error(400, "Invalid JSON request.") unless raw.valid_encoding?
+        execute_graphql(JSON.parse(raw))
+      when "application/x-www-form-urlencoded"
+        execute_graphql(Rack::Utils.parse_nested_query(raw), form: true)
+      else
+        execute_graphql({})
       end
-
-      user_id = session["user_id"]
-      user = settings.data.user(user_id)
-      result = GraphQLAPI::Schema.execute(query, variables: variables || {}, operation_name: operation, context: {
-        user: user && WorkspaceData.new(user),
-        csrf_valid: -> { GraphQLAPI::TOKEN_VALIDATOR.valid_header?(env) },
-        update_name: ->(name) { settings.data.update_user_name(user_id, name) },
-        sign_out: -> { reset_session }
-      })
-      JSON.generate(result.to_h)
     rescue JSON::ParserError
       graphql_request_error(400, "Invalid JSON request.")
+    rescue Rack::QueryParser::ParameterTypeError, Rack::QueryParser::InvalidParameterError, Rack::QueryParser::QueryLimitError
+      graphql_request_error(400, "Invalid form request.")
     end
 
     post "/signout" do
@@ -265,8 +318,60 @@ module Lab
 
     helpers do
       def workspace_page(user, **locals)
-        csrf_token = Rack::Protection::AuthenticityToken.token(session, path: "#{BASE}#{GraphQLAPI::PATH}")
-        page :workspace, **locals, user: WorkspaceData.new(user), csrf_token: csrf_token
+        page :workspace, **locals, user: WorkspaceData.new(user), csrf_token: expose_csrf_token, app_script: true
+      end
+
+      def sign_in_page(view, **locals)
+        one_tap = !settings.data.user(session["user_id"]) && request.path_info != "/account"
+        page view, **locals, csrf_token: expose_csrf_token, app_script: one_tap, one_tap: one_tap
+      end
+
+      def expose_csrf_token
+        token = local_action_token("#{BASE}#{GraphQLAPI::PATH}")
+        response.set_cookie("csrftoken", value: token, path: BASE, secure: true, same_site: :lax)
+        token
+      end
+
+      def execute_graphql(payload, form: false)
+        graphql_request_error(400, "Expected a GraphQL request object.") unless payload.is_a?(Hash)
+        source, variables, operation, extensions = payload.values_at("query", "variables", "operationName", "extensions")
+        missing_query = source.nil? || (source.is_a?(String) && source.strip.empty?)
+        if missing_query && extensions.is_a?(Hash)
+          source = GraphQLAPI::PERSISTED_QUERIES[extensions["operationId"]]
+        elsif missing_query
+          source = nil
+        end
+        graphql_request_error(200, "No query string was present") if source.nil?
+        variables = variables.empty? ? nil : JSON.parse(variables) if form && variables.is_a?(String)
+        unless source.is_a?(String) && (variables.nil? || variables.is_a?(Hash)) && (operation.nil? || operation.is_a?(String))
+          graphql_request_error(400, "Expected a query string, an optional variables object, and an optional operationName string.")
+        end
+
+        query = GraphQL::Query.new(GraphQLAPI::Schema, source, variables: variables || {}, operation_name: operation)
+        if query.mutation? && !request.post?
+          status 403
+          return error_page("Forbidden", "Use POST for GraphQL mutations.")
+        end
+
+        null_session = query.mutation? && !GraphQLAPI::HEADER_VALIDATOR.accepts?(env)
+        active_session = null_session ? {} : session
+        env.fetch("rack.session.options")[:skip] = true if null_session
+        user = settings.data.user(active_session["user_id"])
+        query.context[:user] = user && WorkspaceData.new(user)
+        query.context[:update_name] = ->(name) { settings.data.update_user_name(active_session["user_id"], name) }
+        clear_session = -> { null_session ? active_session.clear : reset_session }
+        query.context[:sign_out] = clear_session
+        query.context[:oauth_sign_in] = lambda do |token|
+          claims = settings.id_token_validator.check(token, settings.data.client.fetch("client_id"))
+          user = settings.data.find_or_create_user(claims.fetch("sub"), email: claims.fetch("email"), name: claims.fetch("name"))
+          clear_session.call
+          active_session["user_id"] = user.fetch("id")
+          user
+        end
+        content_type :json
+        JSON.generate(query.result.to_h)
+      rescue JSON::ParserError
+        graphql_request_error(400, "Invalid JSON request.")
       end
 
       def graphql_request_error(status, message)
@@ -279,7 +384,7 @@ module Lab
       end
 
       def action_form(path, label, style:)
-        token = Rack::Protection::AuthenticityToken.token(session, path: path)
+        token = local_action_token(path)
         <<~HTML
           <form method="post" action="#{escape(path)}">
             <input type="hidden" name="authenticity_token" value="#{escape(token)}">
