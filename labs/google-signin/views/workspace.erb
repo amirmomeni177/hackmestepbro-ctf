@@ -1,0 +1,58 @@
+<div class="workspace" data-workspace-page="<%= escape(section) %>" data-base="<%= escape(Lab::BASE) %>">
+  <aside class="workspace-sidebar" aria-label="Workspace">
+    <%= erb :brand, layout: false %>
+    <nav aria-label="Workspace navigation">
+      <% active_path = section == :account ? Lab::ACCOUNT_PATH : Lab::HOME_PATH %>
+      <% [
+        ["home", "Home", Lab::HOME_PATH],
+        ["board", "Boards", "#{Lab::HOME_PATH}#boards"],
+        ["assets", "Assets", "#{Lab::HOME_PATH}#asset-activity"],
+        ["reviews", "Reviews", "#{Lab::HOME_PATH}#review-activity"],
+        ["team", "Team", "#{Lab::HOME_PATH}#team-activity"],
+        ["settings", "Settings", Lab::ACCOUNT_PATH]
+      ].each do |symbol, label, destination| %>
+        <a href="<%= escape(destination) %>"<%= ' aria-current="page"' if destination == active_path %>><%= icon(symbol) %><span><%= escape(label) %></span></a>
+      <% end %>
+    </nav>
+  </aside>
+
+  <div class="workspace-area">
+    <header class="workspace-top">
+      <label class="workspace-search">
+        <%= icon("search") %>
+        <span class="sr-only">Search workspace</span>
+        <input type="search" placeholder="Search workspace" disabled>
+      </label>
+      <div class="workspace-actions">
+        <a class="icon-button" href="<%= escape(Lab::HOME_PATH) %>#activity" aria-label="Notifications"><%= icon("bell") %></a>
+        <% if section == :dashboard %>
+          <details class="account-menu">
+            <summary class="icon-button" aria-label="Account menu">
+              <span class="avatar" data-profile-initials aria-hidden="true"><%= escape(initials(user.name)) %></span>
+              <%= icon("down") %>
+            </summary>
+            <div class="account-menu-panel">
+              <div class="menu-identity">
+                <p><strong data-profile-name><%= escape(user.name) %></strong></p>
+                <p data-profile-email><%= escape(user.email) %></p>
+              </div>
+              <a href="<%= escape(Lab::ACCOUNT_PATH) %>">Account</a>
+              <%= action_form(Lab::REQUEST_PATH, "Switch account", style: "button-menu") %>
+              <%= action_form("#{Lab::BASE}/signout", "Sign out", style: "button-menu") %>
+            </div>
+          </details>
+        <% else %>
+          <span class="avatar" data-profile-initials aria-hidden="true"><%= escape(initials(user.name)) %></span>
+        <% end %>
+      </div>
+    </header>
+
+    <main id="main-content" class="workspace-content" tabindex="-1">
+      <% if section == :account %>
+        <%= erb :account, layout: false, locals: { user: user, subject: subject } %>
+      <% else %>
+        <%= erb :dashboard, layout: false, locals: { user: user, error: error } %>
+      <% end %>
+    </main>
+  </div>
+</div>

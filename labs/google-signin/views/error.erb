@@ -1,0 +1,12 @@
+<main id="main-content" class="wrap error-page" tabindex="-1">
+  <section class="<%= escape(settings.theme == "keystone" ? "keystone-card" : "card") %>" aria-labelledby="error-title">
+    <% if settings.theme == "keystone" %>
+      <div class="keystone-brand"><span class="provider-mark"><%= icon("keystone") %></span> Keystone ID</div>
+    <% else %>
+      <%= erb :brand, layout: false %>
+    <% end %>
+    <h1 id="error-title"><%= escape(title) %></h1>
+    <p>HTTP <code><%= escape(status_code) %></code> · <%= escape(message) %></p>
+    <a class="back-link" href="<%= escape(Lab::HOME_PATH) %>">Return to Lumora <%= icon("arrow") %></a>
+  </section>
+</main>

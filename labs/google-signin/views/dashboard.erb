@@ -1,0 +1,47 @@
+<header class="workspace-heading dashboard-heading">
+  <%= erb :signin_alert, layout: false, locals: { error: error } %>
+  <% first_name = name_parts(user.name).first %>
+  <h1 data-dashboard-greeting><%= first_name ? "Welcome back, #{escape(first_name)}." : "Welcome back." %></h1>
+  <p>Here’s what’s happening in <span data-workspace-name><%= escape(user.workspace.fetch(:name)) %></span>.</p>
+</header>
+
+<section id="boards" class="dashboard-section" aria-labelledby="boards-title">
+  <h2 id="boards-title">Recent boards</h2>
+  <div class="recent-boards">
+    <% user.boards.zip(%w[art-solstice art-field art-orbit]).each do |board, art| %>
+      <article class="card recent-board">
+        <div class="board-art <%= art %>" style="--cover-hue: <%= board.fetch(:cover_hue) %>deg" aria-hidden="true"></div>
+        <div>
+          <h3><%= escape(board.fetch(:title)) %></h3>
+          <p><span data-assets-count><%= board.fetch(:assets_count) %></span> assets · Updated
+            <time datetime="<%= board.fetch(:updated_at) %>"><%= display_date(board.fetch(:updated_at)) %></time>
+          </p>
+        </div>
+      </article>
+    <% end %>
+  </div>
+</section>
+
+<div class="dashboard-lower">
+  <section id="activity" class="card activity" aria-labelledby="activity-title">
+    <h2 id="activity-title">Workspace activity</h2>
+    <ul role="list">
+      <% user.activity.zip(%w[review-activity asset-activity team-activity]).each do |item, anchor| %>
+        <li id="<%= anchor %>">
+          <span class="avatar" aria-hidden="true"><%= escape(initials(item.fetch(:actor_name))) %></span>
+          <div>
+            <p><strong data-actor><%= escape(item.fetch(:actor_name)) %></strong>
+              <span data-verb><%= escape(item.fetch(:verb)) %></span>
+              <strong data-board-title><%= escape(item.fetch(:board_title)) %></strong>.</p>
+            <small><time datetime="<%= item.fetch(:at) %>"><%= display_date(item.fetch(:at)) %></time></small>
+          </div>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+  <section class="card workspace-tip" aria-labelledby="tip-title">
+    <span class="feature-icon"><%= icon("spark") %></span>
+    <h2 id="tip-title">You’re caught up</h2>
+    <p>No reviews are assigned to you. When a teammate requests feedback, it will show up here.</p>
+  </section>
+</div>

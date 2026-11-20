@@ -1,0 +1,47 @@
+<main id="main-content" class="wrap signin-page" tabindex="-1">
+  <section class="signin-brand" aria-labelledby="signin-brand-title">
+    <%= erb :brand, layout: false %>
+    <div class="signin-brand-copy">
+      <h2 id="signin-brand-title">Every good idea needs <em>room.</em></h2>
+      <p>Bring your boards, assets, and reviews together in one shared workspace.</p>
+    </div>
+    <svg class="signin-art" viewBox="0 0 480 270" fill="none" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="signin-warm" x2="1" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#ffcf92"/><stop offset="1" stop-color="#d56f58"/></linearGradient>
+        <pattern id="signin-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#ffc184" opacity=".28"/></pattern>
+      </defs>
+      <path fill="url(#signin-dots)" d="M0 0h480v270H0z"/>
+      <g transform="translate(41 64) rotate(-12 107 82)">
+        <rect width="214" height="164" rx="15" fill="#302229" stroke="#b58073"/>
+        <circle cx="106" cy="82" r="53" fill="url(#signin-warm)"/>
+        <path d="M26 121c28-39 54-46 83-29 25 15 48 16 79-13M26 136c28-39 54-46 83-29 25 15 48 16 79-13" stroke="#ffe3c2" stroke-width="2"/>
+      </g>
+      <g transform="translate(222 42) rotate(13 103 82)">
+        <rect width="206" height="157" rx="15" fill="#402a38" stroke="#bc8e9f"/>
+        <ellipse cx="103" cy="79" rx="63" ry="35" transform="rotate(-30 103 79)" stroke="#e6b9da" stroke-width="2"/>
+        <ellipse cx="103" cy="79" rx="54" ry="25" transform="rotate(-30 103 79)" stroke="#e6b9da" stroke-width="2"/>
+        <path d="M103 50c2 18 11 27 29 29-18 2-27 11-29 29-2-18-11-27-29-29 18-2 27-11 29-29Z" fill="#ffc17f"/>
+      </g>
+      <circle cx="419" cy="223" r="5" fill="#ffc17f"/><circle cx="177" cy="38" r="6" fill="#efb9cc"/>
+    </svg>
+  </section>
+
+  <section class="signin-card card" aria-labelledby="signin-title">
+    <h1 id="signin-title">Welcome back to Lumora</h1>
+    <p>Sign in to open your team’s workspace.</p>
+    <%= erb :signin_alert, layout: false, locals: { error: error } %>
+    <%= action_form(Lab::REQUEST_PATH, "Continue with Keystone ID", style: "button-primary button-wide") %>
+    <div class="signin-divider"><span>or</span></div>
+    <section class="disabled-signin" aria-labelledby="email-signin-title">
+      <h2 id="email-signin-title">Email and password</h2>
+      <fieldset disabled aria-describedby="email-signin-note">
+        <legend class="sr-only">Email and password sign-in</legend>
+        <label>Email <input type="email" autocomplete="email"></label>
+        <label>Password <input type="password" autocomplete="current-password"></label>
+        <button class="button button-secondary button-wide" type="button">Sign in with email</button>
+      </fieldset>
+      <p id="email-signin-note"><%= icon("lock") %> Email sign-in is turned off in this lab</p>
+    </section>
+    <p class="signin-legal">By continuing, you agree to our <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
+  </section>
+</main>

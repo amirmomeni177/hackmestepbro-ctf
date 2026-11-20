@@ -14,7 +14,7 @@
     "path": "/labs/google-signin/",
     "category": "OAuth / OIDC",
     "difficulty": "Reference lab",
-    "description": "Stock OmniAuth Google sign-in (pinned gems, unmodified) against a mock identity provider. Study lab: no flag.",
+    "description": "Lumora, a fictional creative-workspace SaaS with Keystone ID sign-in and a GraphQL API. Stock OmniAuth Google OAuth2 strategy (pinned, unmodified gems) against a mock identity provider. Study lab: no flag.",
     "image": "/assets/terminal.1.webp"
   }
 ]

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "fileutils"
 require "json"
 require "openssl"
@@ -7,15 +8,22 @@ require "securerandom"
 require "sinatra/base"
 require "tempfile"
 require "uri"
+require_relative "graphql_api"
 
 module Lab
   BASE = "/labs/google-signin"
   HOME_PATH = "#{BASE}/"
+  SIGNIN_PATH = "#{BASE}/signin"
+  ACCOUNT_PATH = "#{BASE}/account"
   IDP_PATH = "#{BASE}/idp"
+  AUTHORIZE_PATH = "#{IDP_PATH}/o/oauth2/auth"
   AUTH_PREFIX = "#{BASE}/users/auth"
   STRATEGY = "google_oauth2"
   REQUEST_PATH = "#{AUTH_PREFIX}/#{STRATEGY}"
   CALLBACK_PATH = "#{REQUEST_PATH}/callback"
+  ASSETS_PATH = "#{BASE}/assets"
+  PUBLIC_DIR = File.join(__dir__, "public")
+  CSS_VERSION = Digest::SHA256.file(File.join(PUBLIC_DIR, "assets", "lab.css")).hexdigest[0, 12].freeze
   PORT = Integer(ENV.fetch("PORT", "18320"))
   public_origin = ENV["PUBLIC_ORIGIN"].to_s
   public_origin = "https://ctf.hackmestepbro.com" if public_origin.empty?
@@ -48,9 +56,13 @@ module Lab
     end
 
     def user(id)
+      user_with_subject(id)&.last
+    end
+
+    def user_with_subject(id)
       return unless id
 
-      read_users.values.find { |user| user["id"] == id }
+      read_users.find { |_, user| user["id"] == id }
     end
 
     def find_or_create_user(sub, email:, name:)
@@ -62,6 +74,18 @@ module Lab
           write(@users_path, JSON.generate(users))
           user
         end
+      end
+    end
+
+    def update_user_name(id, name)
+      with_lock do
+        users = read_users
+        user = users.values.find { |entry| entry["id"] == id }
+        return unless user
+
+        user["name"] = name
+        write(@users_path, JSON.generate(users))
+        user
       end
     end
 
@@ -107,70 +131,73 @@ module Lab
 
   class WebApp < Sinatra::Base
     set :absolute_redirects, false
+    set :views, File.join(__dir__, "views")
+    set :brand, "Lumora"
+    set :theme, "lumora"
     disable :static
     set :host_authorization, permitted_hosts: [URI.parse(PUBLIC_ORIGIN).host, "127.0.0.1"]
+
+    not_found { error_page("Page not found", "The requested page could not be found.") }
+    error(Sinatra::BadRequest) { error_page("Bad request", "The lab could not read the request.") }
+    error(500) { error_page("Internal server error", "The lab could not complete the request.") }
 
     helpers do
       def escape(value)
         Rack::Utils.escape_html(value.to_s)
       end
 
-      def page(title, content)
-        <<~HTML
-          <!doctype html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>#{escape(title)}</title>
-            <style>
-              body { margin: 0; background: #f3f6f5; color: #182724; font: 1rem/1.5 system-ui, sans-serif; }
-              main { max-width: 28rem; margin: 12vh auto 0; padding: 2rem; background: white;
-                     border: 1px solid #d9e3e0; border-radius: 12px; }
-              h1 { margin: 0; font-size: 1.75rem; }
-              form { margin-top: 1.125rem; }
-              button { padding: .65rem 1rem; border: 1px solid #245e51; border-radius: 6px;
-                       background: #245e51; color: white; font: inherit; cursor: pointer; }
-              button:hover { background: #184337; }
-              button:focus-visible { outline: 2px solid #184337; outline-offset: 3px; }
-              form.accounts { display: grid; gap: .65rem; }
-              [role="alert"] { color: #9a2828; }
-              @media (max-width: 36rem) { main { margin: 2rem 1rem; padding: 1.5rem; } }
-            </style>
-          </head>
-          <body><main><h1>#{escape(title)}</h1>#{content}</main></body>
-          </html>
-        HTML
+      def page(view, title:, **locals)
+        content_type :html
+        erb view, locals: locals.merge(title: title)
+      end
+
+      def error_page(title, message)
+        page :error, title: title, status_code: status, message: message
+      end
+
+      def initials(name)
+        name_parts(name).first(2).map { |word| word[/\A\X/] }.join.upcase
+      end
+
+      def name_parts(name)
+        name.to_s.split(/[[:space:]]+/).reject(&:empty?)
+      end
+
+      def icon(name)
+        %(<svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-#{escape(name)}"></use></svg>)
       end
     end
   end
 
   class RelyingParty < WebApp
-    use Rack::Protection::AuthenticityToken
+    use GraphQLAPI::AuthenticityToken
 
     before { cache_control :no_store }
 
     get "/" do
       user = settings.data.user(session["user_id"])
-      status_text = if user
-                      "Signed in as <strong>#{escape(user.fetch("name"))}</strong> (#{escape(user.fetch("email"))})."
-                    else
-                      "Signed out."
-                    end
-      error = params["error"]
-      error_message = "<p role=\"alert\">Sign-in failed (#{escape(error)}).</p>" if error
+      if user
+        workspace_page(user, title: "Home", section: :dashboard, error: params["error"])
+      else
+        page :home, title: "Creative workspace", error: params["error"]
+      end
+    end
 
-      page("Sign-in lab", <<~HTML)
-        <p>#{status_text}</p>
-        #{error_message}
-        #{action_form(REQUEST_PATH, "Sign in with Google")}
-        #{action_form("#{BASE}/signout", "Sign out") if user}
-      HTML
+    get "/signin" do
+      page :signin, title: "Sign in", error: params["error"]
+    end
+
+    get "/account" do
+      subject, user = settings.data.user_with_subject(session["user_id"])
+      redirect SIGNIN_PATH unless user
+
+      workspace_page(user, title: "Account settings", section: :account, subject: subject)
     end
 
     get "/users/auth/google_oauth2" do
       headers "Allow" => "POST"
-      halt 405, "Method Not Allowed"
+      status 405
+      error_page("Method not allowed", "Start sign-in from the lab to submit a POST request.")
     end
 
     get "/users/auth/google_oauth2/callback" do
@@ -193,18 +220,70 @@ module Lab
       JSON.generate(signed_in: !user.nil?, user: user)
     end
 
+    get GraphQLAPI::PATH do
+      headers "Allow" => "POST"
+      graphql_request_error(405, "Use POST for GraphQL requests.")
+    end
+
+    get "#{GraphQLAPI::PATH}/schema" do
+      content_type :txt
+      GraphQLAPI::SDL
+    end
+
+    post GraphQLAPI::PATH do
+      content_type :json
+      limit = GraphQLAPI::MAX_BODY_BYTES
+      graphql_request_error(413, "GraphQL requests cannot exceed 16 KB.") if request.content_length.to_i > limit
+
+      raw = request.body.read(limit + 1).to_s.force_encoding(Encoding::UTF_8)
+      graphql_request_error(413, "GraphQL requests cannot exceed 16 KB.") if raw.bytesize > limit
+      graphql_request_error(415, "Use application/json for GraphQL requests.") unless request.media_type == "application/json"
+      graphql_request_error(400, "Invalid JSON request.") unless raw.valid_encoding?
+      payload = JSON.parse(raw)
+      query, variables, operation = payload.values_at("query", "variables", "operationName") if payload.is_a?(Hash)
+      unless query.is_a?(String) && (variables.nil? || variables.is_a?(Hash)) && (operation.nil? || operation.is_a?(String))
+        graphql_request_error(400, "Expected a query string, an optional variables object, and an optional operationName string.")
+      end
+
+      user_id = session["user_id"]
+      user = settings.data.user(user_id)
+      result = GraphQLAPI::Schema.execute(query, variables: variables || {}, operation_name: operation, context: {
+        user: user && WorkspaceData.new(user),
+        csrf_valid: -> { GraphQLAPI::TOKEN_VALIDATOR.valid_header?(env) },
+        update_name: ->(name) { settings.data.update_user_name(user_id, name) },
+        sign_out: -> { reset_session }
+      })
+      JSON.generate(result.to_h)
+    rescue JSON::ParserError
+      graphql_request_error(400, "Invalid JSON request.")
+    end
+
     post "/signout" do
       reset_session
       redirect HOME_PATH
     end
 
     helpers do
-      def action_form(path, label)
+      def workspace_page(user, **locals)
+        csrf_token = Rack::Protection::AuthenticityToken.token(session, path: "#{BASE}#{GraphQLAPI::PATH}")
+        page :workspace, **locals, user: WorkspaceData.new(user), csrf_token: csrf_token
+      end
+
+      def graphql_request_error(status, message)
+        content_type :json
+        halt status, JSON.generate(errors: [{ message: message }])
+      end
+
+      def display_date(value)
+        Time.iso8601(value).strftime("%b %-d, %Y")
+      end
+
+      def action_form(path, label, style:)
         token = Rack::Protection::AuthenticityToken.token(session, path: path)
         <<~HTML
           <form method="post" action="#{escape(path)}">
             <input type="hidden" name="authenticity_token" value="#{escape(token)}">
-            <button type="submit">#{escape(label)}</button>
+            <button class="button #{escape(style)}" type="submit">#{escape(label)}</button>
           </form>
         HTML
       end

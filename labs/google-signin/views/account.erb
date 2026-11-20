@@ -1,0 +1,45 @@
+<header class="workspace-heading">
+  <h1>Account settings</h1>
+  <p>Manage your profile and how you sign in to Lumora.</p>
+</header>
+
+<div class="settings-grid">
+  <section class="card settings-card" aria-labelledby="profile-title">
+    <h2 id="profile-title">Profile</h2>
+    <div class="settings-profile">
+      <span class="avatar" data-profile-initials aria-hidden="true"><%= escape(initials(user.name)) %></span>
+      <div><p><strong data-profile-name><%= escape(user.name) %></strong></p><p data-profile-email><%= escape(user.email) %></p></div>
+    </div>
+    <form class="display-name-form" method="post" novalidate>
+      <fieldset disabled aria-describedby="display-name-note">
+        <label for="display-name">Display name</label>
+        <div class="display-name-controls">
+          <input id="display-name" name="name" value="<%= escape(user.name) %>" required aria-describedby="display-name-status">
+          <button class="button button-primary" type="submit">Save</button>
+        </div>
+      </fieldset>
+      <p id="display-name-note">Enable JavaScript to edit your display name.</p>
+      <p id="display-name-status" class="display-name-status" role="status"></p>
+    </form>
+  </section>
+  <section class="card settings-card" aria-labelledby="connected-title">
+    <h2 id="connected-title">Connected sign-in</h2>
+    <div class="settings-provider"><span class="provider-mark"><%= icon("keystone") %></span><strong data-profile-provider>Keystone ID</strong></div>
+    <dl class="settings-details">
+      <div><dt>Subject ID</dt><dd><code><%= escape(subject) %></code></dd></div>
+      <div><dt>Connected</dt><dd>This session</dd></div>
+    </dl>
+  </section>
+  <section class="card settings-card" aria-labelledby="sessions-title">
+    <h2 id="sessions-title">Sessions</h2>
+    <div class="session-device"><span class="feature-icon"><%= icon("screen") %></span><div><p><strong>Current session</strong></p><p>This browser</p></div></div>
+  </section>
+  <section class="card settings-card danger-zone" aria-labelledby="danger-title">
+    <h2 id="danger-title">Danger zone</h2>
+    <p>Disconnecting Keystone ID and deleting your account are disabled in this lab.</p>
+    <div class="danger-actions">
+      <button class="button button-secondary" type="button" disabled>Disconnect Keystone ID</button>
+      <button class="button button-secondary" type="button" disabled>Delete account</button>
+    </div>
+  </section>
+</div>

@@ -20,7 +20,7 @@ The service and proxy examples in `deploy/` configure the [CTF site](https://ctf
 
 Labs under `labs/` are study replicas, not challenges: they have no flag and no planted bug.
 
-- [`labs/google-signin`](labs/google-signin/README.md) runs a Rails-style "Sign in with Google" flow on the stock OmniAuth stack. The gems are pinned and unmodified: `omniauth` 2.4.2, `omniauth-oauth2` 1.10.1, `omniauth-google-oauth2` 1.2.3 and `oauth2` 2.1.0. They run against an in-lab mock identity provider. It is served at [ctf.hackmestepbro.com/labs/google-signin/](https://ctf.hackmestepbro.com/labs/google-signin/) by `deploy/google-signin-lab.service` on loopback port 18320, behind the `/labs/google-signin/` location in `deploy/ctf.hackmestepbro.com.nginx`.
+- [`labs/google-signin`](labs/google-signin/README.md) is Lumora, a fictional creative-workspace SaaS with "Continue with Keystone ID" sign-in and a GraphQL API (graphql-ruby 2.6.16, CSRF-protected mutations). Under the hood it runs the stock OmniAuth Google OAuth2 flow. The gems are pinned and unmodified: `omniauth` 2.4.2, `omniauth-oauth2` 1.10.1, `omniauth-google-oauth2` 1.2.3 and `oauth2` 2.1.0. They run against an in-lab mock identity provider. It is served at [ctf.hackmestepbro.com/labs/google-signin/](https://ctf.hackmestepbro.com/labs/google-signin/) by `deploy/google-signin-lab.service` on loopback port 18320, behind the `/labs/google-signin/` location in `deploy/ctf.hackmestepbro.com.nginx`.
 
 ## Inspiration
 

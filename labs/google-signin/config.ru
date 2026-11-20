@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rack/session/cookie"
+require "rack/static"
 require "omniauth-google-oauth2"
 require_relative "app"
 require_relative "idp"
@@ -25,7 +26,7 @@ use OmniAuth::Builder do
   provider :google_oauth2, data.client.fetch("client_id"), data.client.fetch("client_secret"),
            prompt: "select_account", skip_jwt: false,
            client_options: {
-             authorize_url: "#{Lab::PUBLIC_ORIGIN}#{Lab::IDP_PATH}/o/oauth2/auth",
+             authorize_url: "#{Lab::PUBLIC_ORIGIN}#{Lab::AUTHORIZE_PATH}",
              connection_build: lambda do |connection|
                builder = connection.builder
                builder.insert(0, Lab::MockTransport)
@@ -36,6 +37,8 @@ use OmniAuth::Builder do
 end
 
 map Lab::BASE do
+  use Rack::Static, urls: ["/assets"], root: Lab::PUBLIC_DIR, cascade: true,
+                    cache_control: "public, max-age=86400"
   run Lab::RelyingParty
 end
 

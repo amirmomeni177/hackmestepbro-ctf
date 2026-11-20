@@ -1,0 +1,47 @@
+<main id="main-content" class="wrap keystone-page" tabindex="-1">
+  <section class="keystone-card" aria-labelledby="provider-title">
+    <header class="keystone-header">
+      <div class="keystone-brand"><span class="provider-mark"><%= icon("keystone") %></span> Keystone ID</div>
+      <h1 id="provider-title"><%= escape(title) %></h1>
+      <% unless error %><p>to continue to <strong>Lumora</strong></p><% end %>
+    </header>
+
+    <% if error %>
+      <p class="alert" role="alert"><strong>Keystone ID rejected the request.</strong> <code><%= escape(error) %></code></p>
+      <a class="back-link" href="<%= escape(Lab::HOME_PATH) %>">Return to Lumora <%= icon("arrow") %></a>
+    <% else %>
+      <form class="accounts" method="get" action="<%= escape(Lab::AUTHORIZE_PATH) %>">
+        <% fields.each do |name, value| %>
+          <input type="hidden" name="<%= escape(name) %>" value="<%= escape(value) %>">
+        <% end %>
+        <% accounts.each do |email, account| %>
+          <% name = account.fetch("name", email) %>
+          <button class="account" type="submit" name="account" value="<%= escape(email) %>">
+            <span class="avatar" aria-hidden="true"><%= escape(initials(name)) %></span>
+            <span class="account-details"><strong><%= escape(name) %></strong><span><%= escape(email) %></span></span>
+            <%= icon("chevron") %>
+          </button>
+        <% end %>
+      </form>
+      <button class="account another-account" type="button" disabled>
+        <span class="avatar" aria-hidden="true"><%= icon("plus") %></span>
+        <span>Use another account</span>
+      </button>
+      <div class="scope-details">
+        <p>Keystone ID will share your name, email address and profile picture with Lumora</p>
+        <% if scopes.empty? %>
+          <p class="empty-scopes">No scopes requested</p>
+        <% else %>
+          <ul class="chips" aria-label="Requested scopes" role="list">
+            <% scopes.each do |scope| %><li><code><%= escape(scope) %></code></li><% end %>
+          </ul>
+        <% end %>
+      </div>
+    <% end %>
+  </section>
+</main>
+
+<footer class="wrap keystone-footer">
+  <label><span class="sr-only">Language</span><select><option>English</option></select></label>
+  <nav aria-label="Keystone ID information"><a href="#">Help</a><span aria-hidden="true">·</span><a href="#">Privacy</a><span aria-hidden="true">·</span><a href="#">Terms</a></nav>
+</footer>

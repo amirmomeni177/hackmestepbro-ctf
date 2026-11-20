@@ -108,37 +108,31 @@ module Lab
   end
 
   class MockIdentityProvider < WebApp
+    set :brand, "Keystone ID"
+    set :theme, "keystone"
+
     AUTHORIZE_FIELDS = %w[client_id redirect_uri response_type scope state].freeze
 
     get "/o/oauth2/auth" do
       cache_control :no_store
-      halt 400, json(error: "invalid_client") unless params["client_id"] == settings.data.client.fetch("client_id")
-      halt 400, json(error: "redirect_uri_mismatch") unless params["redirect_uri"] == REDIRECT_URI
+      authorization_error("invalid_client") unless params["client_id"] == settings.data.client.fetch("client_id")
+      authorization_error("redirect_uri_mismatch") unless params["redirect_uri"] == REDIRECT_URI
       redirect authorization_result(error: "unsupported_response_type") unless params["response_type"] == "code"
 
       if params.key?("account")
         account = settings.data.accounts[params["account"]]
-        halt 400, json(error: "invalid_request") unless account
+        authorization_error("invalid_request") unless account
 
         scope = params["scope"]
-        halt 400, json(error: "invalid_scope") unless scope.nil? || scope.is_a?(String)
+        authorization_error("invalid_scope") unless scope.nil? || scope.is_a?(String)
         code = settings.grants.authorize(account: account, client_id: params["client_id"],
                                          redirect_uri: params["redirect_uri"], scope: scope || "email profile")
         redirect authorization_result(code: code)
       end
 
-      fields = params.slice(*AUTHORIZE_FIELDS).map do |name, value|
-        %(<input type="hidden" name="#{escape(name)}" value="#{escape(value)}">)
-      end
-      buttons = settings.data.accounts.keys.map do |email|
-        %(<button type="submit" name="account" value="#{escape(email)}">#{escape(email)}</button>)
-      end
-      page("Choose an account", <<~HTML)
-        <form class="accounts" method="get" action="#{IDP_PATH}/o/oauth2/auth">
-          #{fields.join("\n")}
-          #{buttons.join("\n")}
-        </form>
-      HTML
+      scope = params["scope"]
+      page :chooser, title: "Choose an account", error: nil, scopes: scope.is_a?(String) ? scope.split : [],
+                     fields: params.slice(*AUTHORIZE_FIELDS), accounts: settings.data.accounts
     end
 
     post "/token" do
@@ -188,6 +182,15 @@ module Lab
     end
 
     helpers do
+      def authorization_error(code)
+        if request.preferred_type("application/json", "text/html") == "text/html" &&
+           request.accept.any? { |entry| entry.to_s == "text/html" && entry.priority.first.positive? }
+          halt 400, page(:chooser, title: "Authorization error", error: code)
+        end
+
+        halt 400, json(error: code)
+      end
+
       def json(data)
         content_type :json
         JSON.generate(data)

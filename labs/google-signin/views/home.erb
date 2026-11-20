@@ -1,0 +1,85 @@
+<header class="marketing-header wrap">
+  <%= erb :brand, layout: false %>
+  <nav class="desktop-nav" aria-label="Main navigation">
+    <%= erb :marketing_nav, layout: false %>
+  </nav>
+  <details class="mobile-nav">
+    <summary aria-label="Main menu"><%= icon("menu") %></summary>
+    <nav aria-label="Main navigation">
+      <%= erb :marketing_nav, layout: false %>
+    </nav>
+  </details>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <%= erb :signin_alert, layout: false, locals: { error: error } %>
+    <h1 id="hero-title">Make good work <em>together.</em></h1>
+    <p>A creative workspace for teams to gather inspiration, organize assets, and give feedback where the work happens.</p>
+    <div class="hero-actions">
+      <a class="button button-primary" href="<%= escape(Lab::SIGNIN_PATH) %>">Get started <%= icon("arrow") %></a>
+      <a class="button button-secondary" href="#product">Explore the workspace <%= icon("down") %></a>
+    </div>
+    <%= erb :board_preview, layout: false %>
+  </section>
+
+  <section id="customers" class="customer-section">
+    <div class="wrap">
+      <h2>Made for teams like these</h2>
+      <ul class="wordmarks" role="list">
+        <li>Marrow &amp; Finch</li><li>Foldline</li><li>Vellum House</li><li>Somewhere Dept.</li>
+      </ul>
+      <figure class="testimonial">
+        <blockquote>“Our reviews finally happen in the same place as the work. Everyone opens the board and knows which direction we’re taking.”</blockquote>
+        <figcaption><span class="avatar" aria-hidden="true">MV</span><span><strong>Mara Vale</strong><br>Creative Director, Vellum House</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="product" class="wrap marketing-section" aria-labelledby="product-title">
+    <h2 id="product-title">From first sketch to final sign-off</h2>
+    <div class="feature-grid">
+      <article class="card"><span class="feature-icon"><%= icon("board") %></span><h3>Boards with room to think</h3><p>Arrange references, drafts, and decisions on a shared canvas everyone can read.</p></article>
+      <article class="card"><span class="feature-icon"><%= icon("assets") %></span><h3>One home for every asset</h3><p>Keep imagery, working files, and final exports beside the project that needs them.</p></article>
+      <article class="card"><span class="feature-icon"><%= icon("reviews") %></span><h3>Feedback in context</h3><p>Leave comments next to the work and see what’s ready for the next round.</p></article>
+    </div>
+  </section>
+
+  <section id="pricing" class="wrap marketing-section pricing" aria-labelledby="pricing-title">
+    <h2 id="pricing-title">Plans for the way you work</h2>
+    <div class="pricing-grid">
+      <article class="card plan">
+        <h3>Studio</h3><p>For small teams starting a project.</p><p class="price">$0 <span>/ month</span></p>
+        <ul><li>3 shared boards</li><li>2 GB asset storage</li><li>Comments on boards</li></ul>
+        <a class="button button-secondary" href="<%= escape(Lab::SIGNIN_PATH) %>">Get started</a>
+      </article>
+      <article class="card plan plan-featured">
+        <h3>Team</h3><p>For teams running regular reviews.</p><p class="price">$12 <span>/ seat per month</span></p>
+        <ul><li>Unlimited boards</li><li>100 GB asset storage</li><li>Review rounds and approvals</li></ul>
+        <a class="button button-primary" href="<%= escape(Lab::SIGNIN_PATH) %>">Get started</a>
+      </article>
+      <article class="card plan">
+        <h3>Collective</h3><p>For studios with multiple teams.</p><p class="price">$24 <span>/ seat per month</span></p>
+        <ul><li>Multiple workspaces</li><li>1 TB asset storage</li><li>Workspace access controls</li></ul>
+        <a class="button button-secondary" href="<%= escape(Lab::SIGNIN_PATH) %>">Get started</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="card workspace-access">
+      <h2>Open your workspace</h2>
+      <%= action_form(Lab::REQUEST_PATH, "Continue with Keystone ID", style: "button-secondary") %>
+    </div>
+  </section>
+</main>
+
+<footer id="docs" class="marketing-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand"><%= erb :brand, layout: false %><p>Creative work, in good company.</p></div>
+    <section><h2>Product</h2><a href="#product">Features</a><a href="#pricing">Pricing</a></section>
+    <section><h2>Company</h2><a href="#customers">Customers</a><a href="#">About</a></section>
+    <section><h2>Resources</h2><a href="#">Docs</a><a href="#">Help</a></section>
+    <section><h2>Legal</h2><a href="#">Privacy</a><a href="#">Terms</a></section>
+  </div>
+</footer>
