@@ -1,10 +1,12 @@
-# HackMeStepBro CTF Library
+# Hacker’s Wallhalla
 
 Play on the [live CTF library](https://ctf.hackmestepbro.com/). The first challenge, **The Wrong Window**, is set in a fictional creator studio. Players sign in as a demo creator, explore studio features, and use network responses to compare synthetic delivery receipts. The separate challenge brief accepts a page or API reference and grades the finding on the server.
 
 The demo uses an authorization-code flow with a separate sandbox issuer, consent, state, S256 PKCE, and a server-side code exchange. Read the [Instagram and Facebook OAuth research](docs/meta-oauth-research.md) for a comparison with Meta’s actual products. The recorded incident uses synthetic evidence.
 
 ## Challenge library
+
+**Shadowed Attributes** is a defensive DOM clobbering puzzle with simulated traces. Identify the failed lookup, choose a patch and regression assertion, and submit the finding for a server-graded flag.
 
 The homepage lists the challenges in `challenges.json`. To list another challenge, add an entry with a unique ID, name, launch path, category, difficulty, description, and cover image. The launch path must lead to that challenge’s own page. Serve custom covers from the app’s assets or reuse the existing cover. Restart the app after editing the catalog.
 

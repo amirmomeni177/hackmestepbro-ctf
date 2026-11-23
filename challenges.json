@@ -9,6 +9,15 @@
     "image": "/assets/terminal.1.webp"
   },
   {
+    "id": "shadowed-attributes",
+    "name": "Shadowed Attributes",
+    "path": "/challenges/shadowed-attributes",
+    "category": "Browser security · DOM clobbering",
+    "difficulty": "Beginner",
+    "description": "Compare two cleanup traces, identify the shadowed DOM property, and choose the patch that captures the flag.",
+    "image": "/assets/terminal.1.webp"
+  },
+  {
     "id": "google-signin-lab",
     "name": "Google Sign-In Reference Lab",
     "path": "/labs/google-signin/",

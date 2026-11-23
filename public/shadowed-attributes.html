@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Trace a DOM clobbering bug and choose the fix in Hacker’s Wallhalla.">
+  <meta name="theme-color" content="#111015">
+  <title>Shadowed Attributes — Hacker’s Wallhalla</title>
+  <link rel="icon" href="/assets/icon.1.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.2.css">
+  <link rel="stylesheet" href="/assets/wallhalla.1.css">
+  <script src="/assets/shadowed-attributes.1.js" defer></script>
+</head>
+<body class="wallhalla">
+  <div class="shell">
+    <header class="header">
+      <a href="/" class="brand wallhalla-brand"><span class="brand-mark" aria-hidden="true"></span>Hacker’s Wallhalla</a>
+      <a class="wallhalla-back" href="/">← Challenge library</a>
+    </header>
+    <main class="shadow-main">
+      <div class="shadow-intro">
+        <p class="eyebrow"><span aria-hidden="true"></span>Browser security · Beginner</p>
+        <h1>Shadowed <em>Attributes.</em></h1>
+        <p>A preview form’s cleanup pass leaves two event-handler attributes behind. Read the simulated trace, identify the broken assumption, and choose the patch that earns the flag.</p>
+      </div>
+
+      <div class="shadow-grid">
+        <section aria-labelledby="trace-heading" class="shadow-panel">
+          <h2 id="trace-heading">Cleanup trace</h2>
+          <p class="shadow-muted">Compare what the same loop reads in each case.</p>
+          <fieldset class="shadow-trace-choice">
+            <legend>Recorded case</legend>
+            <label><input type="radio" name="trace" value="baseline" checked> Baseline</label>
+            <label><input type="radio" name="trace" value="incident"> Incident</label>
+          </fieldset>
+          <div class="shadow-code">
+            <span>Loop entry · read-only excerpt</span>
+            <pre><code>const form = document.getElementById('x');
+const length = form.attributes.length;
+// Loop over the attributes and remove handlers.</code></pre>
+          </div>
+          <dl class="shadow-trace" aria-live="polite">
+            <div><dt><code>form</code></dt><dd>HTMLFormElement</dd></div>
+            <div><dt><code>form.attributes</code></dt><dd id="trace-value">NamedNodeMap</dd></div>
+            <div><dt><code>form.attributes.length</code></dt><dd id="trace-length">3</dd></div>
+            <div><dt>First loop index</dt><dd id="trace-index">2</dd></div>
+            <div><dt>Event-handler attributes remaining</dt><dd id="trace-handlers">0</dd></div>
+          </dl>
+          <details class="shadow-hint">
+            <summary>Hint</summary>
+            <p>Compare the type on the second row. What happens when a lookup returns a control where the loop expects an attribute collection?</p>
+          </details>
+        </section>
+
+        <section aria-labelledby="finding-heading" class="shadow-panel">
+          <h2 id="finding-heading">Submit your finding</h2>
+          <form id="shadow-finding">
+            <div class="shadow-question">
+              <label for="shadow-cause">What changed in the incident?</label>
+              <select id="shadow-cause" name="cause" required>
+                <option value="">Choose the cause</option>
+                <option value="parser">The parser discarded the event-handler attributes.</option>
+                <option value="named-control">A form control shadowed the built-in property.</option>
+                <option value="events">A listener removed the form before cleanup.</option>
+              </select>
+            </div>
+            <div class="shadow-question">
+              <label for="shadow-patch">Which patch fixes this lookup?</label>
+              <select id="shadow-patch" name="patch" required>
+                <option value="">Choose the patch</option>
+                <option value="scan-forward">Scan the same collection forward.</option>
+                <option value="guard-length">Skip cleanup when the length is missing.</option>
+                <option value="prototype-methods">Call the built-in Element methods directly.</option>
+              </select>
+            </div>
+            <div class="shadow-question">
+              <label for="shadow-test">What should the regression test assert?</label>
+              <select id="shadow-test" name="regression" required>
+                <option value="">Choose the assertion</option>
+                <option value="remove-only-handlers">Both handlers are removed and the form ID is preserved.</option>
+                <option value="loop-count">The loop always runs exactly once.</option>
+                <option value="form-found">The form can still be found by its ID.</option>
+              </select>
+            </div>
+            <button class="shadow-submit" type="submit">Check finding</button>
+            <p id="shadow-status" class="shadow-status" role="status"></p>
+          </form>
+          <section hidden id="shadow-solved" class="shadow-solved" aria-labelledby="shadow-solved-title">
+            <h3 id="shadow-solved-title">Flag captured</h3>
+            <code id="shadow-flag"></code>
+            <p>The first index was <code>NaN</code>. The loop condition was false before the first iteration.</p>
+            <pre><code>for (const name of Element.prototype
+  .getAttributeNames.call(form)) {
+  if (/^on/i.test(name)) {
+    Element.prototype.removeAttribute.call(form, name);
+  }
+}</code></pre>
+            <p>This patch fixes the attribute lookup. For untrusted rich HTML, use a maintained sanitizer before rendering. For plain text, use <code>textContent</code>.</p>
+          </section>
+          <noscript><p class="shadow-muted">Enable JavaScript to compare the trace and submit your finding.</p></noscript>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

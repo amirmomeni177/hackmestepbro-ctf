@@ -41,7 +41,19 @@ VIEWS = {
     "/studio/help": "Help center",
 }
 CHALLENGE_PATH = "/challenges/the-wrong-window"
-PAGES = {CHALLENGE_PATH: "challenge.html", "/case": "case.html"}
+SHADOW_PATH = "/challenges/shadowed-attributes"
+SHADOW_VERIFY_PATH = "/api/shadowed-attributes/verify"
+PAGES = {
+    CHALLENGE_PATH: "challenge.html",
+    SHADOW_PATH: "shadowed-attributes.html",
+    "/case": "case.html",
+}
+SHADOW_FLAG = "CTF{" + hmac.digest(SESSION_KEY, b"shadowed-attributes", "sha256").hex()[:32] + "}"
+SHADOW_ANSWERS = {
+    "cause": "named-control",
+    "patch": "prototype-methods",
+    "regression": "remove-only-handlers",
+}
 CATALOG = json.loads((PUBLIC.parent / "challenges.json").read_text(encoding="utf-8"))
 ASSETS = {
     "site.2.css": "text/css; charset=utf-8",
@@ -50,6 +62,8 @@ ASSETS = {
     "case.4.js": "text/javascript; charset=utf-8",
     "library.2.css": "text/css; charset=utf-8",
     "library.1.js": "text/javascript; charset=utf-8",
+    "wallhalla.1.css": "text/css; charset=utf-8",
+    "shadowed-attributes.1.js": "text/javascript; charset=utf-8",
     "terminal.1.webp": "image/webp",
     "icon.1.svg": "image/svg+xml",
 }
@@ -339,8 +353,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self.library()
             return
-        if path == CHALLENGE_PATH + "/":
-            self.reply(308, b"", "text/plain; charset=utf-8", headers=[("Location", CHALLENGE_PATH)])
+        if path in {CHALLENGE_PATH + "/", SHADOW_PATH + "/"}:
+            self.reply(308, b"", "text/plain; charset=utf-8", headers=[("Location", path[:-1])])
             return
         if path in PAGES:
             self.html(PAGES[path])
@@ -370,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
         if host == OAUTH.issuer_host:
             self.issuer_post(path)
             return
-        if host != OAUTH.app_host or path not in {"/api/demo/signout", "/api/verify"}:
+        if host != OAUTH.app_host or path not in {"/api/demo/signout", "/api/verify", SHADOW_VERIFY_PATH}:
             self.json_reply(404, {"message": "Route not found."})
             return
         if not self.authenticated_post():
@@ -388,6 +402,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/demo/signout":
             self.json_reply(200, {"connected": False}, [("Set-Cookie", self.session_cookie(clear=True))])
+            return
+        if path == SHADOW_VERIFY_PATH:
+            if all(body.get(key) == answer for key, answer in SHADOW_ANSWERS.items()):
+                self.json_reply(200, {"solved": True, "flag": SHADOW_FLAG})
+            else:
+                self.json_reply(200, {
+                    "solved": False,
+                    "message": "That finding is incomplete. Compare the traces and review your choices.",
+                })
             return
         route = body.get("route")
         if isinstance(route, str):
